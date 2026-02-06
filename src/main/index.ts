@@ -1,8 +1,9 @@
 /**
  * Electron主进程入口
  */
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, nativeImage } from 'electron';
 import { join } from 'path';
+import { existsSync } from 'fs';
 import { WindowManager } from './window/WindowManager';
 import { IPCHandlers } from './ipc/handlers';
 import { DatabaseService } from './database/DatabaseService';
@@ -59,6 +60,21 @@ app.whenReady().then(async () => {
   // 设置应用用户模型ID (Windows)
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.kreader.app');
+  }
+
+  // 设置 macOS Dock 图标（开发环境）
+  if (process.platform === 'darwin' && isDev) {
+    // 开发环境使用 PNG 格式（Electron 对 PNG 支持更好）
+    const iconPath = join(process.cwd(), 'resources', 'icon.png');
+    console.log('[Main] Looking for icon at:', iconPath);
+    console.log('[Main] Icon exists:', existsSync(iconPath));
+    if (existsSync(iconPath)) {
+      const icon = nativeImage.createFromPath(iconPath);
+      console.log('[Main] Icon loaded, size:', icon.getSize());
+      // 设置 Dock 图标
+      app.dock.setIcon(icon);
+      console.log('[Main] Dock icon set successfully');
+    }
   }
 
   // 初始化应用

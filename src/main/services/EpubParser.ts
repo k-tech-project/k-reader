@@ -116,36 +116,52 @@ export class EpubParser {
     const meta = metadataNode?.[0];
     const dc = meta?.['dc:metadata']?.[0] || meta;
 
+    const asText = (value: any): string | undefined => {
+      if (value === undefined || value === null) return undefined;
+      if (typeof value === 'string') return value.trim();
+      if (typeof value === 'number') return String(value);
+      if (Array.isArray(value)) return asText(value[0]);
+      if (typeof value === 'object') {
+        if (typeof value._ === 'string') return value._.trim();
+      }
+      return String(value).trim();
+    };
+
     const getTitle = () => {
-      if (meta?.['dc:title']) return meta['dc:title'][0];
-      if (meta?.title) return meta.title[0]?._ || meta.title[0];
-      if (dc?.['dc:title']) return dc['dc:title'][0];
+      if (meta?.['dc:title']) return asText(meta['dc:title']);
+      if (meta?.title) return asText(meta.title);
+      if (dc?.['dc:title']) return asText(dc['dc:title']);
       return 'Unknown';
     };
 
     const getCreator = () => {
-      if (meta?.['dc:creator']) return meta['dc:creator'][0];
-      if (meta?.creator) return meta.creator[0]?._ || meta.creator[0];
-      if (dc?.['dc:creator']) return dc['dc:creator'][0];
+      if (meta?.['dc:creator']) return asText(meta['dc:creator']);
+      if (meta?.creator) return asText(meta.creator);
+      if (dc?.['dc:creator']) return asText(dc['dc:creator']);
       return 'Unknown';
     };
 
     const getPublisher = () => {
-      if (meta?.['dc:publisher']) return meta['dc:publisher'][0];
-      if (meta?.publisher) return meta.publisher[0];
+      if (meta?.['dc:publisher']) return asText(meta['dc:publisher']);
+      if (meta?.publisher) return asText(meta.publisher);
       return undefined;
     };
 
     const getDate = () => {
-      if (meta?.['dc:date']) return new Date(meta['dc:date'][0]);
-      if (meta?.date) return new Date(meta.date[0]);
+      const dateText =
+        asText(meta?.['dc:date']) ||
+        asText(meta?.date);
+      if (dateText) {
+        const date = new Date(dateText);
+        if (!Number.isNaN(date.getTime())) return date;
+      }
       return undefined;
     };
 
     const getISBN = () => {
       const identifiers = meta?.['dc:identifier'] || meta?.identifier || [];
       for (const id of identifiers) {
-        const value = id._ || id;
+        const value = asText(id);
         if (typeof value === 'string' && (value.includes('isbn:') || value.includes('ISBN'))) {
           return value.replace(/isbn:/i, '');
         }
@@ -154,17 +170,14 @@ export class EpubParser {
     };
 
     const getLanguage = () => {
-      if (meta?.['dc:language']) return meta['dc:language'][0];
-      if (meta?.language) return meta.language[0];
+      if (meta?.['dc:language']) return asText(meta['dc:language']);
+      if (meta?.language) return asText(meta.language);
       return undefined;
     };
 
     const getDescription = () => {
-      if (meta?.['dc:description']) return meta['dc:description'][0];
-      if (meta?.description) {
-        const desc = meta.description[0];
-        return typeof desc === 'string' ? desc : desc._;
-      }
+      if (meta?.['dc:description']) return asText(meta['dc:description']);
+      if (meta?.description) return asText(meta.description);
       return undefined;
     };
 
@@ -292,15 +305,31 @@ export class EpubParser {
   ): Promise<string | undefined> {
     const manifest = manifestNode?.[0];
     const meta = manifest?.meta || [];
+    const items = manifest?.item || [];
 
     // 查找封面元数据
     const coverMeta = meta.find((m: any) => m.$.name === 'cover');
-    if (!coverMeta) {
-      return undefined;
+    let coverItem: any | undefined;
+    if (coverMeta) {
+      const coverId = coverMeta.$.content;
+      coverItem = items.find((i: any) => i.$.id === coverId);
     }
 
-    const coverId = coverMeta.$.content;
-    const coverItem = manifest?.item?.find((i: any) => i.$.id === coverId);
+    // EPUB3 常见方式：properties="cover-image"
+    if (!coverItem) {
+      coverItem = items.find((i: any) =>
+        typeof i.$?.properties === 'string' && i.$.properties.includes('cover-image')
+      );
+    }
+
+    // 兜底：文件名包含 cover 且为图片
+    if (!coverItem) {
+      coverItem = items.find((i: any) => {
+        const href = String(i.$?.href || '').toLowerCase();
+        const mediaType = String(i.$?.['media-type'] || '').toLowerCase();
+        return mediaType.startsWith('image/') && href.includes('cover');
+      });
+    }
 
     if (!coverItem) {
       return undefined;
@@ -322,7 +351,9 @@ export class EpubParser {
    */
   static async extractCoverData(filePath: string): Promise<Buffer | null> {
     try {
-      const zip = await JSZip.loadAsync(filePath);
+      // 读取文件为 Buffer
+      const buffer = await readFile(filePath);
+      const zip = await JSZip.loadAsync(buffer);
       const parseResult = await this.parse(filePath);
 
       if (!parseResult.coverPath) {
@@ -347,7 +378,9 @@ export class EpubParser {
    */
   static async validate(filePath: string): Promise<boolean> {
     try {
-      const zip = await JSZip.loadAsync(filePath);
+      // 读取文件为 Buffer
+      const buffer = await readFile(filePath);
+      const zip = await JSZip.loadAsync(buffer);
 
       // 检查必需的文件
       const hasContainer = zip.file('META-INF/container.xml') !== null;
@@ -361,7 +394,7 @@ export class EpubParser {
       }
 
       const container = await parseStringPromise(containerXml);
-      const rootfilePath = container.rootfiles?.rootfile?.[0]?.$?.['full-path'];
+      const rootfilePath = container?.container?.rootfiles?.[0]?.rootfile?.[0]?.$?.['full-path'];
       if (!rootfilePath) {
         return false;
       }

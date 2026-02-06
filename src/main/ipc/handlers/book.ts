@@ -7,6 +7,7 @@ import type { Book, BookMetadata } from '@shared/types';
 import { DatabaseService } from '../../database/DatabaseService';
 import { FileHandlers } from './file';
 import { EpubParser } from '../../services/EpubParser';
+import { logger } from '@shared/utils/Logger';
 
 export class BookHandlers {
   /**
@@ -14,17 +15,15 @@ export class BookHandlers {
    */
   static async import(filePath: string): Promise<Book> {
     try {
+      const startedAt = Date.now();
+      logger.info(`Import started: ${filePath}`, 'BookHandlers');
+
       // 验证文件存在
       const exists = await FileHandlers.exists(filePath);
       if (!exists) {
         throw new Error('File not found');
       }
-
-      // 验证 EPUB 文件
-      const isValid = await EpubParser.validate(filePath);
-      if (!isValid) {
-        throw new Error('Invalid EPUB file');
-      }
+      logger.debug('File exists', 'BookHandlers');
 
       // 检查是否已导入
       const db = DatabaseService.getInstance().getDatabase();
@@ -34,15 +33,18 @@ export class BookHandlers {
       if (existing) {
         throw new Error('Book already imported');
       }
+      logger.debug('Not imported yet', 'BookHandlers');
 
       // 解析 EPUB
       const epubData = await EpubParser.parse(filePath);
+      logger.debug('EPUB parsed', 'BookHandlers');
 
       // 获取文件信息
       const fileInfo = await FileHandlers.getInfo(filePath);
       if (!fileInfo) {
         throw new Error('Failed to get file info');
       }
+      logger.debug(`File info size=${fileInfo.size}`, 'BookHandlers');
 
       // 生成书籍 ID
       const bookId = uuidv4();
@@ -51,11 +53,13 @@ export class BookHandlers {
       const userDataPath = FileHandlers.getUserDataPath();
       const booksDir = path.join(userDataPath, 'books');
       await FileHandlers.mkdir(booksDir, true);
+      logger.debug(`Books dir ready: ${booksDir}`, 'BookHandlers');
 
       // 复制书籍文件
       const bookFileName = `${bookId}.epub`;
       const destPath = path.join(booksDir, bookFileName);
       await FileHandlers.copy(filePath, destPath);
+      logger.debug(`Book copied to ${destPath}`, 'BookHandlers');
 
       // 提取封面
       let coverUrl: string | undefined;
@@ -67,6 +71,9 @@ export class BookHandlers {
         const coverPath = path.join(coverDir, coverFileName);
         await FileHandlers.write(coverPath, coverData);
         coverUrl = coverPath;
+        logger.debug(`Cover written: ${coverPath} (${coverData.length} bytes)`, 'BookHandlers');
+      } else {
+        logger.debug('No cover data found', 'BookHandlers');
       }
 
       // 准备书籍数据
@@ -106,7 +113,7 @@ export class BookHandlers {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
-      stmt.run(
+      const params = [
         book.id,
         book.title,
         book.author,
@@ -120,8 +127,12 @@ export class BookHandlers {
         book.fileSize,
         book.format,
         Math.floor(book.addedAt.getTime() / 1000),
-        JSON.stringify(book.metadata)
-      );
+        JSON.stringify(book.metadata),
+      ];
+
+      logger.debug('Inserting book into DB', 'BookHandlers');
+      stmt.run(params);
+      logger.info(`Import completed in ${Date.now() - startedAt}ms`, 'BookHandlers');
 
       return book;
     } catch (error) {

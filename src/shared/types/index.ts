@@ -185,7 +185,7 @@ export interface Collection {
   name: string;
   description?: string;
   createdAt: Date;
-  updatedAt: Date;
+  bookCount?: number;
 }
 
 // ========== 同步相关类型 ==========

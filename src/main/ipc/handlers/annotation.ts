@@ -210,11 +210,57 @@ export class AnnotationHandlers {
         };
       }
 
-      // TODO: 实现不同格式的导出
-      // 这里先返回 JSON 格式
-      const data = JSON.stringify(annotations, null, 2);
+      let data: string;
 
-      logger.info(`Exported ${annotations.length} annotations for book ${options.bookId}`, 'AnnotationHandlers');
+      if (options.format === 'json') {
+        // JSON 格式
+        data = JSON.stringify(annotations, null, 2);
+      } else if (options.format === 'markdown') {
+        // Markdown 格式
+        const highlights = annotations.filter(a => a.type === 'highlight');
+        const bookmarks = annotations.filter(a => a.type === 'bookmark');
+
+        let markdown = '# 阅读批注导出\n\n';
+        markdown += `导出时间: ${new Date().toLocaleString('zh-CN')}\n\n`;
+
+        // 高亮批注
+        if (highlights.length > 0) {
+          markdown += `## 高亮批注 (${highlights.length})\n\n`;
+          highlights.forEach((annotation, index) => {
+            markdown += `### ${index + 1}. ${annotation.selectedText?.substring(0, 30) || '无标题'}...\n\n`;
+            if (annotation.selectedText) {
+              markdown += `> ${annotation.selectedText}\n\n`;
+            }
+            if (annotation.note) {
+              markdown += `**笔记**: ${annotation.note}\n\n`;
+            }
+            markdown += `- 位置: ${annotation.chapterTitle || '未知'}\n`;
+            markdown += `- 时间: ${new Date(annotation.createdAt).toLocaleString('zh-CN')}\n`;
+            if (annotation.color) {
+              markdown += `- 颜色: ${annotation.color}\n`;
+            }
+            markdown += '\n---\n\n';
+          });
+        }
+
+        // 书签
+        if (bookmarks.length > 0) {
+          markdown += `## 书签 (${bookmarks.length})\n\n`;
+          bookmarks.forEach((bookmark, index) => {
+            markdown += `${index + 1}. ${bookmark.chapterTitle || '未知位置'}\n`;
+            markdown += `   - 时间: ${new Date(bookmark.createdAt).toLocaleString('zh-CN')}\n\n`;
+          });
+        }
+
+        data = markdown;
+      } else {
+        return {
+          success: false,
+          error: 'Unsupported format',
+        };
+      }
+
+      logger.info(`Exported ${annotations.length} annotations for book ${options.bookId} in ${options.format} format`, 'AnnotationHandlers');
 
       return {
         success: true,

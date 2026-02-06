@@ -7,7 +7,8 @@ import App from './App';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
+  // 暂时禁用 StrictMode，它会导致组件双重挂载，影响 epub.js 的实例管理
+  // <React.StrictMode>
     <App />
-  </React.StrictMode>
+  // </React.StrictMode>
 );

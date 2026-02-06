@@ -9,6 +9,7 @@ import { BookHandlers } from './handlers/book';
 import { AnnotationHandlers } from './handlers/annotation';
 import { ProgressHandlers } from './handlers/progress';
 import { TagHandlers } from './handlers/tag';
+import { CollectionHandlers } from './handlers/collection';
 import { SettingsHandlers } from './handlers/settings';
 import { DatabaseHandlers } from './handlers/database';
 import { SystemHandlers } from './handlers/system';
@@ -24,6 +25,7 @@ export class IPCHandlers {
     this.registerAnnotationHandlers();
     this.registerProgressHandlers();
     this.registerTagHandlers();
+    this.registerCollectionHandlers();
     this.registerSettingsHandlers();
     this.registerDatabaseHandlers();
     this.registerSystemHandlers();
@@ -183,12 +185,65 @@ export class IPCHandlers {
       return TagHandlers.getAll();
     });
 
+    ipcMain.handle(IPCChannels.TAG_GET_BY_BOOK, (_event, bookId) => {
+      return TagHandlers.getByBook(bookId);
+    });
+
+    ipcMain.handle(IPCChannels.TAG_UPDATE, (_event, id, updates) => {
+      return TagHandlers.update(id, updates);
+    });
+
+    ipcMain.handle(IPCChannels.TAG_DELETE, (_event, id) => {
+      return TagHandlers.delete(id);
+    });
+
     ipcMain.handle(IPCChannels.TAG_ADD_TO_BOOK, (_event, data) => {
       return TagHandlers.addToBook(data);
     });
 
     ipcMain.handle(IPCChannels.TAG_REMOVE_FROM_BOOK, (_event, data) => {
       return TagHandlers.removeFromBook(data);
+    });
+  }
+
+  /**
+   * 注册书架相关处理器
+   */
+  private static registerCollectionHandlers(): void {
+    ipcMain.handle(IPCChannels.COLLECTION_CREATE, (_event, data) => {
+      return CollectionHandlers.create(data);
+    });
+
+    ipcMain.handle(IPCChannels.COLLECTION_GET_ALL, () => {
+      return CollectionHandlers.getAll();
+    });
+
+    ipcMain.handle(IPCChannels.COLLECTION_GET, (_event, id) => {
+      return CollectionHandlers.get(id);
+    });
+
+    ipcMain.handle(IPCChannels.COLLECTION_UPDATE, (_event, id, updates) => {
+      return CollectionHandlers.update(id, updates);
+    });
+
+    ipcMain.handle(IPCChannels.COLLECTION_DELETE, (_event, id) => {
+      return CollectionHandlers.delete(id);
+    });
+
+    ipcMain.handle(IPCChannels.COLLECTION_ADD_BOOK, (_event, data) => {
+      return CollectionHandlers.addBook(data);
+    });
+
+    ipcMain.handle(IPCChannels.COLLECTION_REMOVE_BOOK, (_event, data) => {
+      return CollectionHandlers.removeBook(data);
+    });
+
+    ipcMain.handle(IPCChannels.COLLECTION_GET_BOOKS, (_event, collectionId) => {
+      return CollectionHandlers.getBooks(collectionId);
+    });
+
+    ipcMain.handle(IPCChannels.COLLECTION_GET_BY_BOOK, (_event, bookId) => {
+      return CollectionHandlers.getByBook(bookId);
     });
   }
 

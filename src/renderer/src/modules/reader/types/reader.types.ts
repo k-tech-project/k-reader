@@ -18,6 +18,8 @@ export interface EpubRenditionOptions {
   flow?: 'paginated' | 'scrolled' | 'scrolled-doc' | 'auto';
   layout?: 'pre-paginated' | 'reflowable';
   stylesheet?: string;
+  allowScriptedContent?: boolean;
+  allowPopups?: boolean;
 }
 
 // 阅读器状态
@@ -48,7 +50,19 @@ export interface ReaderSettings {
   marginWidth: number;
   readingMode: 'paginated' | 'scrolled';
   theme: ReaderTheme;
+  pageAnimation: PageAnimationType;
 }
+
+// 翻页动画类型
+export type PageAnimationType = 'none' | 'fade' | 'slide' | 'scale';
+
+// 翻页动画配置
+export const PAGE_ANIMATIONS: Record<PageAnimationType, { name: string; description: string }> = {
+  none: { name: '无动画', description: '无过渡效果' },
+  fade: { name: '淡入淡出', description: '页面渐变过渡' },
+  slide: { name: '滑动', description: '页面滑动切换' },
+  scale: { name: '缩放', description: '页面缩放过渡' },
+};
 
 // 阅读器主题
 export interface ReaderTheme {

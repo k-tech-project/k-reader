@@ -61,14 +61,51 @@ export class EpubReader {
     }
 
     try {
+      console.info('[EpubReader] init start', {
+        filePath: options.book.filePath,
+        hasElectronAPI: typeof window !== 'undefined' && !!window.electronAPI?.file?.read,
+      });
+
       // 应用设置
       if (options.settings) {
         this.settings = { ...this.settings, ...options.settings };
       }
 
-      // 打开书籍
-      this.book = ePub(options.book.filePath);
+      // 打开书籍（优先从主进程读取二进制，避免 file:// 被拦截）
+      let bookInput: string | ArrayBuffer = options.book.filePath;
+      try {
+        if (typeof window !== 'undefined' && window.electronAPI?.file?.read) {
+          const data = await window.electronAPI.file.read(options.book.filePath);
+          if (data && typeof data !== 'string') {
+            // 处理 IPC 传递的 Buffer 格式 {type: 'Buffer', data: number[]}
+            let uint8Array: Uint8Array;
+            if (data instanceof Uint8Array) {
+              uint8Array = data;
+            } else if (data && typeof data === 'object' && (data as any).type === 'Buffer' && Array.isArray((data as any).data)) {
+              // IPC 序列化的 Buffer
+              uint8Array = new Uint8Array((data as any).data);
+            } else if (data instanceof ArrayBuffer) {
+              uint8Array = new Uint8Array(data);
+            } else {
+              uint8Array = new Uint8Array(data as ArrayBuffer);
+            }
+            bookInput = uint8Array.buffer.slice(uint8Array.byteOffset, uint8Array.byteOffset + uint8Array.byteLength);
+            console.info('[EpubReader] loaded book bytes', { byteLength: uint8Array.byteLength });
+          } else {
+            console.warn('[EpubReader] file.read returned string, fallback to filePath');
+          }
+        }
+      } catch (error) {
+        console.warn('[EpubReader] file.read failed, fallback to filePath', error);
+      }
+
+      this.book = ePub(bookInput);
+      this.book.on('openFailed', (err: Error) => {
+        console.error('[EpubReader] openFailed', err);
+      });
+
       await this.book.ready;
+      console.info('[EpubReader] book ready');
 
       // 创建渲染器
       const renditionOptions: EpubRenditionOptions = {
@@ -76,6 +113,8 @@ export class EpubReader {
         height: '100%',
         spread: 'auto',
         flow: this.settings.readingMode === 'paginated' ? 'paginated' : 'scrolled',
+        allowScriptedContent: true, // 允许 iframe 中执行脚本
+        allowPopups: false, // 不允许弹窗
         ...this.getThemeStyles(),
       };
 
@@ -83,6 +122,8 @@ export class EpubReader {
         options.element,
         renditionOptions
       );
+      console.info('[EpubReader] rendition created, instance:', !!this.rendition);
+      console.info('[EpubReader] rendition methods - next:', typeof this.rendition.next, 'prev:', typeof this.rendition.prev);
 
       // 设置主题
       this.applyTheme(this.settings.theme);
@@ -96,9 +137,11 @@ export class EpubReader {
       } else {
         await this.rendition.display();
       }
+      console.info('[EpubReader] display complete');
 
       // 保存初始位置
       this.currentLocation = this.rendition.location as ReaderLocation;
+      console.info('[EpubReader] emitting ready event, location:', this.currentLocation);
 
       this.emit('ready', { location: this.currentLocation });
     } catch (error) {
@@ -111,13 +154,34 @@ export class EpubReader {
    * 翻到下一页
    */
   async next(): Promise<void> {
-    if (!this.rendition) return;
+    console.log('[EpubReader #' + (this as any).__instanceId + '] next called, rendition:', !!this.rendition, 'isDestroyed:', this.isDestroyed);
+    if (!this.rendition) {
+      console.error('[EpubReader] next: rendition is null!');
+      return;
+    }
+    
+    if (this.isDestroyed) {
+      console.error('[EpubReader] next: instance is destroyed!');
+      return;
+    }
 
     try {
-      await this.rendition.next();
-      this.updateLocation();
+      console.log('[EpubReader] calling rendition.next(), location before:', this.currentLocation?.start?.cfi?.substring(0, 80));
+      const result = await this.rendition.next();
+      console.log('[EpubReader] rendition.next() completed, result:', result);
+      
+      // 手动更新位置
+      setTimeout(() => {
+        const newLocation = this.rendition?.location as ReaderLocation;
+        console.log('[EpubReader] location after next (setTimeout):', newLocation?.start?.cfi?.substring(0, 80));
+        if (newLocation && newLocation.start.cfi !== this.currentLocation?.start.cfi) {
+          console.log('[EpubReader] Location changed detected!');
+        } else {
+          console.warn('[EpubReader] Location did NOT change after next()!');
+        }
+      }, 100);
     } catch (error) {
-      console.error('Failed to go to next page:', error);
+      console.error('[EpubReader] Failed to go to next page:', error);
       throw error;
     }
   }
@@ -126,13 +190,34 @@ export class EpubReader {
    * 翻到上一页
    */
   async prev(): Promise<void> {
-    if (!this.rendition) return;
+    console.log('[EpubReader #' + (this as any).__instanceId + '] prev called, rendition:', !!this.rendition, 'isDestroyed:', this.isDestroyed);
+    if (!this.rendition) {
+      console.error('[EpubReader] prev: rendition is null!');
+      return;
+    }
+    
+    if (this.isDestroyed) {
+      console.error('[EpubReader] prev: instance is destroyed!');
+      return;
+    }
 
     try {
-      await this.rendition.prev();
-      this.updateLocation();
+      console.log('[EpubReader] calling rendition.prev(), location before:', this.currentLocation?.start?.cfi?.substring(0, 80));
+      const result = await this.rendition.prev();
+      console.log('[EpubReader] rendition.prev() completed, result:', result);
+      
+      // 手动更新位置
+      setTimeout(() => {
+        const newLocation = this.rendition?.location as ReaderLocation;
+        console.log('[EpubReader] location after prev (setTimeout):', newLocation?.start?.cfi?.substring(0, 80));
+        if (newLocation && newLocation.start.cfi !== this.currentLocation?.start.cfi) {
+          console.log('[EpubReader] Location changed detected!');
+        } else {
+          console.warn('[EpubReader] Location did NOT change after prev()!');
+        }
+      }, 100);
     } catch (error) {
-      console.error('Failed to go to previous page:', error);
+      console.error('[EpubReader] Failed to go to previous page:', error);
       throw error;
     }
   }
@@ -284,18 +369,145 @@ export class EpubReader {
   /**
    * 搜索文本
    */
-  async search(_query: string): Promise<any[]> {
-    if (!this.book) return [];
+  async search(query: string): Promise<Array<{ cfi: string; excerpt: string; chapter: string }>> {
+    if (!this.book || !this.rendition) return [];
+    if (!query.trim()) return [];
 
     try {
-      // epub.js 的搜索功能需要额外的插件
-      // 这里返回空数组，后续可以集成搜索插件
-      console.warn('Search functionality not implemented yet');
-      return [];
+      const results: Array<{ cfi: string; excerpt: string; chapter: string }> = [];
+
+      // 获取目录信息
+      const navigation = await this.book.loaded.navigation;
+      const tocItems = navigation.toc;
+
+      // 简单的搜索实现：在每个章节中搜索
+      for (const item of tocItems) {
+        try {
+          // 获取章节内容
+          const section = this.book.section(item.href);
+          if (!section) continue;
+
+          const contents = await section.document();
+          if (!contents) continue;
+
+          // 搜索文本
+          const textContent = contents.textContent || '';
+          const lowerQuery = query.toLowerCase();
+          const lowerText = textContent.toLowerCase();
+
+          // 查找所有匹配位置
+          let index = lowerText.indexOf(lowerQuery);
+          while (index !== -1) {
+            // 获取上下文
+            const start = Math.max(0, index - 50);
+            const end = Math.min(textContent.length, index + query.length + 50);
+            const excerpt = '...' + textContent.substring(start, end) + '...';
+
+            results.push({
+              cfi: `${item.href}[${index}]`, // 简化的 CFI 表示
+              excerpt: excerpt.replace(new RegExp(query, 'gi'), `**${query}**`),
+              chapter: item.label,
+            });
+
+            // 查找下一个匹配
+            index = lowerText.indexOf(lowerQuery, index + 1);
+          }
+        } catch (err) {
+          console.warn(`Failed to search in section ${item.href}:`, err);
+        }
+      }
+
+      console.info(`[EpubReader] Search completed, found ${results.length} results`);
+      return results;
     } catch (error) {
       console.error('Search failed:', error);
       return [];
     }
+  }
+
+  /**
+   * 高亮搜索结果
+   */
+  highlightSearch(query: string): void {
+    if (!this.rendition) return;
+
+    // 移除之前的高亮
+    this.clearHighlight();
+
+    // 添加新的高亮
+    const highlight = (contents: any) => {
+      const body = contents.contentDocument.body;
+      const textNodes: Node[] = [];
+
+      // 收集所有文本节点
+      const walker = document.createTreeWalker(
+        body,
+        NodeFilter.SHOW_TEXT,
+        null
+      );
+
+      let node;
+      while ((node = walker.nextNode())) {
+        textNodes.push(node);
+      }
+
+      // 高亮匹配的文本
+      const regex = new RegExp(`(${query})`, 'gi');
+      textNodes.forEach((textNode) => {
+        const parent = textNode.parentElement;
+        if (!parent) return;
+
+        const text = textNode.textContent || '';
+        if (!regex.test(text)) return;
+
+        const frag = document.createDocumentFragment();
+        let lastIdx = 0;
+        text.replace(regex, (match, p1, idx) => {
+          // 添加匹配前的文本
+          frag.appendChild(document.createTextNode(text.slice(lastIdx, idx)));
+
+          // 添加高亮的匹配文本
+          const mark = document.createElement('mark');
+          mark.className = 'epub-search-highlight';
+          mark.style.backgroundColor = 'yellow';
+          mark.style.color = 'black';
+          mark.textContent = p1;
+          frag.appendChild(mark);
+
+          lastIdx = idx + match.length;
+          return match;
+        });
+
+        // 添加剩余的文本
+        if (lastIdx < text.length) {
+          frag.appendChild(document.createTextNode(text.slice(lastIdx)));
+        }
+
+        parent.replaceChild(frag, textNode);
+      });
+    };
+
+    this.rendition.on('rendered', highlight);
+  }
+
+  /**
+   * 清除高亮
+   */
+  clearHighlight(): void {
+    if (!this.rendition) return;
+
+    const contents = this.rendition.getContents();
+    contents.forEach((content: any) => {
+      const doc = content.contentDocument;
+      const highlights = doc.querySelectorAll('.epub-search-highlight');
+      highlights.forEach((mark: Element) => {
+        const parent = mark.parentElement;
+        if (parent) {
+          parent.replaceChild(document.createTextNode(mark.textContent || ''), mark);
+          parent.normalize(); // 合并相邻的文本节点
+        }
+      });
+    });
   }
 
   /**
@@ -314,6 +526,62 @@ export class EpubReader {
     if (selection) {
       selection.removeAllRanges();
     }
+  }
+
+  /**
+   * 获取选中的 CFI 范围
+   */
+  getSelectionCFI(): string | null {
+    if (!this.rendition) return null;
+
+    const contents = this.rendition.getContents();
+    if (!contents || contents.length === 0) return null;
+
+    const selection = contents[0].window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
+
+    const range = selection.getRangeAt(0);
+    return this.rendition.range(range).cfi;
+  }
+
+  /**
+   * 添加高亮批注
+   */
+  addHighlight(cfiRange: string, color: string = 'yellow'): void {
+    if (!this.rendition) return;
+
+    // 使用 epub.js 的 annotations 功能
+    this.rendition.annotations.add(
+      cfiRange,
+      (contents: any) => {
+        const mark = contents.document.createElement('mark');
+        mark.className = 'epub-highlight';
+        mark.style.backgroundColor = color;
+        mark.style.color = 'inherit';
+        return mark;
+      },
+      {},
+      (className: string, cfiRange: string) => {
+        // 高亮点击回调
+        this.emit('highlightClicked', { cfiRange, className });
+      }
+    );
+  }
+
+  /**
+   * 移除高亮批注
+   */
+  removeHighlight(cfiRange: string): void {
+    if (!this.rendition) return;
+    this.rendition.annotations.remove(cfiRange, 'epub-highlight');
+  }
+
+  /**
+   * 获取所有高亮
+   */
+  getHighlights(): string[] {
+    if (!this.rendition) return [];
+    return this.rendition.annotations.keys();
   }
 
   /**
@@ -370,12 +638,15 @@ export class EpubReader {
 
     // 位置改变事件
     this.rendition.on('relocated', (location: ReaderLocation) => {
+      console.log('[EpubReader #' + (this as any).__instanceId + '] relocated event, CFI:', location.start.cfi.substring(0, 80));
+      console.log('[EpubReader] relocated - atStart:', location.atStart, 'atEnd:', location.atEnd);
       this.currentLocation = location;
       this.emit('locationChanged', location);
     });
 
     // 渲染完成事件
     this.rendition.on('rendered', (section: any) => {
+      console.log('[EpubReader #' + (this as any).__instanceId + '] rendered event, href:', section.href);
       this.emit('rendered', section);
     });
 
@@ -471,19 +742,17 @@ export class EpubReader {
   }
 }
 
-// 导出单例
-let epubReaderInstance: EpubReader | null = null;
+// 实例计数器（用于调试）
+let instanceId = 0;
 
-export function getEpubReader(): EpubReader {
-  if (!epubReaderInstance) {
-    epubReaderInstance = new EpubReader();
-  }
-  return epubReaderInstance;
-}
-
-export function destroyEpubReader(): void {
-  if (epubReaderInstance) {
-    epubReaderInstance.destroy();
-    epubReaderInstance = null;
-  }
+/**
+ * 创建新的 EpubReader 实例
+ * 注意：每次调用都会创建新实例，不使用单例模式
+ */
+export function createEpubReader(): EpubReader {
+  instanceId++;
+  console.log('[createEpubReader] Creating new instance, id:', instanceId);
+  const instance = new EpubReader();
+  (instance as any).__instanceId = instanceId;
+  return instance;
 }

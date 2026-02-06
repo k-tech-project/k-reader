@@ -49,8 +49,22 @@ export const IPCChannels = {
   // 标签操作
   TAG_CREATE: 'tag:create',
   TAG_GET_ALL: 'tag:getAll',
+  TAG_GET_BY_BOOK: 'tag:getByBook',
+  TAG_UPDATE: 'tag:update',
+  TAG_DELETE: 'tag:delete',
   TAG_ADD_TO_BOOK: 'tag:addToBook',
   TAG_REMOVE_FROM_BOOK: 'tag:removeFromBook',
+
+  // 书架操作
+  COLLECTION_CREATE: 'collection:create',
+  COLLECTION_GET_ALL: 'collection:getAll',
+  COLLECTION_GET: 'collection:get',
+  COLLECTION_UPDATE: 'collection:update',
+  COLLECTION_DELETE: 'collection:delete',
+  COLLECTION_ADD_BOOK: 'collection:addBook',
+  COLLECTION_REMOVE_BOOK: 'collection:removeBook',
+  COLLECTION_GET_BOOKS: 'collection:getBooks',
+  COLLECTION_GET_BY_BOOK: 'collection:getByBook',
 
   // 设置操作
   SETTINGS_GET: 'settings:get',

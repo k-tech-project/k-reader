@@ -12,6 +12,7 @@ import type {
   Annotation,
   ReadingProgress,
   Tag,
+  Collection,
   ExportResult,
   VersionInfo,
 } from '@shared/types';
@@ -62,10 +63,25 @@ interface ElectronAPI {
   };
 
   tag: {
-    create: (data: any) => Promise<Tag>;
+    create: (data: { name: string; color?: string }) => Promise<Tag>;
     getAll: () => Promise<Tag[]>;
-    addToBook: (data: any) => Promise<void>;
-    removeFromBook: (data: any) => Promise<void>;
+    getByBook: (bookId: string) => Promise<Tag[]>;
+    update: (id: string, updates: { name?: string; color?: string }) => Promise<void>;
+    delete: (id: string) => Promise<void>;
+    addToBook: (data: { bookId: string; tagId: string }) => Promise<void>;
+    removeFromBook: (data: { bookId: string; tagId: string }) => Promise<void>;
+  };
+
+  collection: {
+    create: (data: { name: string; description?: string }) => Promise<Collection>;
+    getAll: () => Promise<Collection[]>;
+    get: (id: string) => Promise<Collection | null>;
+    update: (id: string, updates: { name?: string; description?: string }) => Promise<void>;
+    delete: (id: string) => Promise<void>;
+    addBook: (data: { collectionId: string; bookId: string }) => Promise<void>;
+    removeBook: (data: { collectionId: string; bookId: string }) => Promise<void>;
+    getBooks: (collectionId: string) => Promise<string[]>;
+    getByBook: (bookId: string) => Promise<Collection[]>;
   };
 
   settings: {
@@ -144,8 +160,23 @@ const electronAPI: ElectronAPI = {
   tag: {
     create: (data) => ipcRenderer.invoke(IPCChannels.TAG_CREATE, data),
     getAll: () => ipcRenderer.invoke(IPCChannels.TAG_GET_ALL),
+    getByBook: (bookId) => ipcRenderer.invoke(IPCChannels.TAG_GET_BY_BOOK, bookId),
+    update: (id, updates) => ipcRenderer.invoke(IPCChannels.TAG_UPDATE, id, updates),
+    delete: (id) => ipcRenderer.invoke(IPCChannels.TAG_DELETE, id),
     addToBook: (data) => ipcRenderer.invoke(IPCChannels.TAG_ADD_TO_BOOK, data),
     removeFromBook: (data) => ipcRenderer.invoke(IPCChannels.TAG_REMOVE_FROM_BOOK, data),
+  },
+
+  collection: {
+    create: (data) => ipcRenderer.invoke(IPCChannels.COLLECTION_CREATE, data),
+    getAll: () => ipcRenderer.invoke(IPCChannels.COLLECTION_GET_ALL),
+    get: (id) => ipcRenderer.invoke(IPCChannels.COLLECTION_GET, id),
+    update: (id, updates) => ipcRenderer.invoke(IPCChannels.COLLECTION_UPDATE, id, updates),
+    delete: (id) => ipcRenderer.invoke(IPCChannels.COLLECTION_DELETE, id),
+    addBook: (data) => ipcRenderer.invoke(IPCChannels.COLLECTION_ADD_BOOK, data),
+    removeBook: (data) => ipcRenderer.invoke(IPCChannels.COLLECTION_REMOVE_BOOK, data),
+    getBooks: (collectionId) => ipcRenderer.invoke(IPCChannels.COLLECTION_GET_BOOKS, collectionId),
+    getByBook: (bookId) => ipcRenderer.invoke(IPCChannels.COLLECTION_GET_BY_BOOK, bookId),
   },
 
   settings: {

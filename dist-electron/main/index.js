@@ -1,8 +1,8 @@
 "use strict";
 const electron = require("electron");
 const path = require("path");
-const Store = require("electron-store");
 const fs = require("fs");
+const Store = require("electron-store");
 const uuid = require("uuid");
 const Database = require("better-sqlite3");
 const JSZip = require("jszip");
@@ -30,6 +30,18 @@ class WindowManager {
       y: void 0
     };
     const bounds = savedBounds || defaultBounds;
+    let icon = void 0;
+    if (process.platform !== "darwin") {
+      const iconPath = path.join(process.resourcesPath || path.join(__dirname, "../../.."), "resources", "icon.png");
+      if (process.env.NODE_ENV === "development") {
+        const devIconPath = path.join(process.cwd(), "resources", "icon.png");
+        if (fs.existsSync(devIconPath)) {
+          icon = electron.nativeImage.createFromPath(devIconPath);
+        }
+      } else if (fs.existsSync(iconPath)) {
+        icon = electron.nativeImage.createFromPath(iconPath);
+      }
+    }
     const window = new electron.BrowserWindow({
       ...bounds,
       minWidth: 800,
@@ -38,11 +50,13 @@ class WindowManager {
       autoHideMenuBar: true,
       frame: process.platform === "darwin",
       titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+      icon,
+      // 设置应用图标
       webPreferences: {
         preload: path.join(__dirname, "../preload/index.js"),
         nodeIntegration: false,
         contextIsolation: true,
-        sandbox: true,
+        sandbox: false,
         webSecurity: true
       }
     });
@@ -951,32 +965,45 @@ class EpubParser {
   static extractMetadata(metadataNode) {
     const meta = metadataNode?.[0];
     const dc = meta?.["dc:metadata"]?.[0] || meta;
+    const asText = (value) => {
+      if (value === void 0 || value === null) return void 0;
+      if (typeof value === "string") return value.trim();
+      if (typeof value === "number") return String(value);
+      if (Array.isArray(value)) return asText(value[0]);
+      if (typeof value === "object") {
+        if (typeof value._ === "string") return value._.trim();
+      }
+      return String(value).trim();
+    };
     const getTitle = () => {
-      if (meta?.["dc:title"]) return meta["dc:title"][0];
-      if (meta?.title) return meta.title[0]?._ || meta.title[0];
-      if (dc?.["dc:title"]) return dc["dc:title"][0];
+      if (meta?.["dc:title"]) return asText(meta["dc:title"]);
+      if (meta?.title) return asText(meta.title);
+      if (dc?.["dc:title"]) return asText(dc["dc:title"]);
       return "Unknown";
     };
     const getCreator = () => {
-      if (meta?.["dc:creator"]) return meta["dc:creator"][0];
-      if (meta?.creator) return meta.creator[0]?._ || meta.creator[0];
-      if (dc?.["dc:creator"]) return dc["dc:creator"][0];
+      if (meta?.["dc:creator"]) return asText(meta["dc:creator"]);
+      if (meta?.creator) return asText(meta.creator);
+      if (dc?.["dc:creator"]) return asText(dc["dc:creator"]);
       return "Unknown";
     };
     const getPublisher = () => {
-      if (meta?.["dc:publisher"]) return meta["dc:publisher"][0];
-      if (meta?.publisher) return meta.publisher[0];
+      if (meta?.["dc:publisher"]) return asText(meta["dc:publisher"]);
+      if (meta?.publisher) return asText(meta.publisher);
       return void 0;
     };
     const getDate = () => {
-      if (meta?.["dc:date"]) return new Date(meta["dc:date"][0]);
-      if (meta?.date) return new Date(meta.date[0]);
+      const dateText = asText(meta?.["dc:date"]) || asText(meta?.date);
+      if (dateText) {
+        const date = new Date(dateText);
+        if (!Number.isNaN(date.getTime())) return date;
+      }
       return void 0;
     };
     const getISBN = () => {
       const identifiers = meta?.["dc:identifier"] || meta?.identifier || [];
       for (const id of identifiers) {
-        const value = id._ || id;
+        const value = asText(id);
         if (typeof value === "string" && (value.includes("isbn:") || value.includes("ISBN"))) {
           return value.replace(/isbn:/i, "");
         }
@@ -984,16 +1011,13 @@ class EpubParser {
       return void 0;
     };
     const getLanguage = () => {
-      if (meta?.["dc:language"]) return meta["dc:language"][0];
-      if (meta?.language) return meta.language[0];
+      if (meta?.["dc:language"]) return asText(meta["dc:language"]);
+      if (meta?.language) return asText(meta.language);
       return void 0;
     };
     const getDescription = () => {
-      if (meta?.["dc:description"]) return meta["dc:description"][0];
-      if (meta?.description) {
-        const desc = meta.description[0];
-        return typeof desc === "string" ? desc : desc._;
-      }
+      if (meta?.["dc:description"]) return asText(meta["dc:description"]);
+      if (meta?.description) return asText(meta.description);
       return void 0;
     };
     return {
@@ -1092,12 +1116,25 @@ class EpubParser {
   static async extractCover(zip, manifestNode, rootfileDir) {
     const manifest = manifestNode?.[0];
     const meta = manifest?.meta || [];
+    const items = manifest?.item || [];
     const coverMeta = meta.find((m) => m.$.name === "cover");
-    if (!coverMeta) {
-      return void 0;
+    let coverItem;
+    if (coverMeta) {
+      const coverId = coverMeta.$.content;
+      coverItem = items.find((i) => i.$.id === coverId);
     }
-    const coverId = coverMeta.$.content;
-    const coverItem = manifest?.item?.find((i) => i.$.id === coverId);
+    if (!coverItem) {
+      coverItem = items.find(
+        (i) => typeof i.$?.properties === "string" && i.$.properties.includes("cover-image")
+      );
+    }
+    if (!coverItem) {
+      coverItem = items.find((i) => {
+        const href = String(i.$?.href || "").toLowerCase();
+        const mediaType = String(i.$?.["media-type"] || "").toLowerCase();
+        return mediaType.startsWith("image/") && href.includes("cover");
+      });
+    }
     if (!coverItem) {
       return void 0;
     }
@@ -1113,7 +1150,8 @@ class EpubParser {
    */
   static async extractCoverData(filePath) {
     try {
-      const zip = await JSZip.loadAsync(filePath);
+      const buffer = await promises.readFile(filePath);
+      const zip = await JSZip.loadAsync(buffer);
       const parseResult = await this.parse(filePath);
       if (!parseResult.coverPath) {
         return null;
@@ -1134,7 +1172,8 @@ class EpubParser {
    */
   static async validate(filePath) {
     try {
-      const zip = await JSZip.loadAsync(filePath);
+      const buffer = await promises.readFile(filePath);
+      const zip = await JSZip.loadAsync(buffer);
       const hasContainer = zip.file("META-INF/container.xml") !== null;
       if (!hasContainer) {
         return false;
@@ -1144,7 +1183,7 @@ class EpubParser {
         return false;
       }
       const container = await xml2js.parseStringPromise(containerXml);
-      const rootfilePath = container.rootfiles?.rootfile?.[0]?.$?.["full-path"];
+      const rootfilePath = container?.container?.rootfiles?.[0]?.rootfile?.[0]?.$?.["full-path"];
       if (!rootfilePath) {
         return false;
       }
@@ -1161,31 +1200,35 @@ class BookHandlers {
    */
   static async import(filePath) {
     try {
+      const startedAt = Date.now();
+      logger.info(`Import started: ${filePath}`, "BookHandlers");
       const exists = await FileHandlers.exists(filePath);
       if (!exists) {
         throw new Error("File not found");
       }
-      const isValid = await EpubParser.validate(filePath);
-      if (!isValid) {
-        throw new Error("Invalid EPUB file");
-      }
+      logger.debug("File exists", "BookHandlers");
       const db = DatabaseService.getInstance().getDatabase();
       const existing = db.prepare("SELECT id FROM books WHERE file_path = ?").get(filePath);
       if (existing) {
         throw new Error("Book already imported");
       }
+      logger.debug("Not imported yet", "BookHandlers");
       const epubData = await EpubParser.parse(filePath);
+      logger.debug("EPUB parsed", "BookHandlers");
       const fileInfo = await FileHandlers.getInfo(filePath);
       if (!fileInfo) {
         throw new Error("Failed to get file info");
       }
+      logger.debug(`File info size=${fileInfo.size}`, "BookHandlers");
       const bookId = uuid.v4();
       const userDataPath = FileHandlers.getUserDataPath();
       const booksDir = path.join(userDataPath, "books");
       await FileHandlers.mkdir(booksDir, true);
+      logger.debug(`Books dir ready: ${booksDir}`, "BookHandlers");
       const bookFileName = `${bookId}.epub`;
       const destPath = path.join(booksDir, bookFileName);
       await FileHandlers.copy(filePath, destPath);
+      logger.debug(`Book copied to ${destPath}`, "BookHandlers");
       let coverUrl;
       const coverData = await EpubParser.extractCoverData(filePath);
       if (coverData) {
@@ -1195,6 +1238,9 @@ class BookHandlers {
         const coverPath = path.join(coverDir, coverFileName);
         await FileHandlers.write(coverPath, coverData);
         coverUrl = coverPath;
+        logger.debug(`Cover written: ${coverPath} (${coverData.length} bytes)`, "BookHandlers");
+      } else {
+        logger.debug("No cover data found", "BookHandlers");
       }
       const now = Math.floor(Date.now() / 1e3);
       const book = {
@@ -1229,7 +1275,7 @@ class BookHandlers {
           metadata
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
-      stmt.run(
+      const params = [
         book.id,
         book.title,
         book.author,
@@ -1244,7 +1290,10 @@ class BookHandlers {
         book.format,
         Math.floor(book.addedAt.getTime() / 1e3),
         JSON.stringify(book.metadata)
-      );
+      ];
+      logger.debug("Inserting book into DB", "BookHandlers");
+      stmt.run(params);
+      logger.info(`Import completed in ${Date.now() - startedAt}ms`, "BookHandlers");
       return book;
     } catch (error) {
       console.error("Failed to import book:", error);
@@ -2127,6 +2176,17 @@ async function initialize() {
 electron.app.whenReady().then(async () => {
   if (process.platform === "win32") {
     electron.app.setAppUserModelId("com.kreader.app");
+  }
+  if (process.platform === "darwin" && isDev) {
+    const iconPath = path.join(process.cwd(), "resources", "icon.png");
+    console.log("[Main] Looking for icon at:", iconPath);
+    console.log("[Main] Icon exists:", fs.existsSync(iconPath));
+    if (fs.existsSync(iconPath)) {
+      const icon = electron.nativeImage.createFromPath(iconPath);
+      console.log("[Main] Icon loaded, size:", icon.getSize());
+      electron.app.dock.setIcon(icon);
+      console.log("[Main] Dock icon set successfully");
+    }
   }
   await initialize();
   createWindow();

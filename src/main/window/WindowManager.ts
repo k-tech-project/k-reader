@@ -1,8 +1,9 @@
 /**
  * 窗口管理器
  */
-import { BrowserWindow, screen } from 'electron';
+import { BrowserWindow, screen, nativeImage } from 'electron';
 import { join } from 'path';
+import { existsSync } from 'fs';
 import Store from 'electron-store';
 import type { WindowBounds } from '@shared/types';
 
@@ -37,6 +38,24 @@ export class WindowManager {
 
     const bounds = savedBounds || defaultBounds;
 
+    // macOS 不需要设置 icon，会使用 app bundle 的图标
+    // Windows/Linux 需要设置 icon
+    let icon = undefined;
+    if (process.platform !== 'darwin') {
+      const iconPath = join(process.resourcesPath || join(__dirname, '../../..'), 'resources', 'icon.png');
+
+      // 开发环境下，尝试从项目根目录加载图标
+      if (process.env.NODE_ENV === 'development') {
+        const devIconPath = join(process.cwd(), 'resources', 'icon.png');
+        if (existsSync(devIconPath)) {
+          icon = nativeImage.createFromPath(devIconPath);
+        }
+      } else if (existsSync(iconPath)) {
+        // 生产环境下从 resources 目录加载
+        icon = nativeImage.createFromPath(iconPath);
+      }
+    }
+
     // 创建窗口
     const window = new BrowserWindow({
       ...bounds,
@@ -46,11 +65,12 @@ export class WindowManager {
       autoHideMenuBar: true,
       frame: process.platform === 'darwin',
       titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+      icon, // 设置应用图标
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
         nodeIntegration: false,
         contextIsolation: true,
-        sandbox: true,
+        sandbox: false,
         webSecurity: true,
       },
     });
