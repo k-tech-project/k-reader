@@ -259,6 +259,7 @@ export interface APIError {
 export interface ExportResult {
   success: boolean;
   filePath?: string;
+  data?: string;
   error?: string;
 }
 
@@ -270,3 +271,49 @@ export interface VersionInfo {
   chrome: string;
   node: string;
 }
+
+// ========== 翻译和词典类型 ==========
+
+export interface WordBookEntry {
+  id: string;
+  word: string;
+  translation?: string;
+  definition?: string;
+  language: string;
+  bookId?: string;
+  context?: string;
+  createdAt: Date;
+}
+
+export interface TranslationHistory {
+  id: string;
+  sourceText: string;
+  targetText: string;
+  sourceLang: string;
+  targetLang: string;
+  provider: string;
+  createdAt: Date;
+}
+
+export interface TranslationResult {
+  sourceText: string;
+  translatedText: string;
+  sourceLang: string;
+  targetLang: string;
+  provider?: string;
+}
+
+export interface DictEntry {
+  word: string;
+  pronunciation?: string;
+  definitions: DictDefinition[];
+  examples?: string[];
+  synonyms?: string[];
+}
+
+export interface DictDefinition {
+  partOfSpeech: string;
+  definition: string;
+  examples?: string[];
+}
+

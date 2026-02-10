@@ -4,10 +4,12 @@
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useElectronAPI } from '../../hooks/useElectronAPI';
-import { Plus, BookOpen, FolderOpen, Search, X, List as ListIcon, Squares2x2, Info, ArrowUpDown, ChevronDown, Filter, Tag as TagIcon } from '../../utils/icons';
+import { Plus, BookOpen, FolderOpen, Search, X, List as ListIcon, Squares2x2, Info, ArrowUpDown, ChevronDown, Filter, Tag as TagIcon, FolderCollection, Trash2, CheckSquare, Square } from '../../utils/icons';
 import { toast } from '../../components/Toast';
 import { modal } from '../../components/Modal';
 import { TagManager } from '../../components/TagManager';
+import { CollectionManager } from '../../components/CollectionManager';
+import { BookCardSkeleton } from '../../components/BookCardSkeleton';
 import type { Book } from '@shared/types';
 import type { Tag } from '@shared/types';
 import { useEffect, useState } from 'react';
@@ -36,6 +38,12 @@ export function Library() {
   // 标签筛选状态
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [showTagManager, setShowTagManager] = useState(false);
+
+  // 批量选择状态
+  const [isBatchMode, setIsBatchMode] = useState(false);
+  const [selectedBookIds, setSelectedBookIds] = useState<Set<string>>(new Set());
+  const [showBatchActionMenu, setShowBatchActionMenu] = useState(false);
+  const [showCollectionManager, setShowCollectionManager] = useState(false);
 
   // 获取所有标签
   const { data: allTags = [] } = useQuery({
@@ -225,6 +233,109 @@ export function Library() {
     navigate(`/book/${bookId}`);
   };
 
+  // 批量操作 - 切换选择模式
+  const toggleBatchMode = () => {
+    setIsBatchMode(!isBatchMode);
+    setSelectedBookIds(new Set());
+    setShowBatchActionMenu(false);
+  };
+
+  // 批量操作 - 切换书籍选择
+  const toggleBookSelection = (bookId: string) => {
+    const newSelected = new Set(selectedBookIds);
+    if (newSelected.has(bookId)) {
+      newSelected.delete(bookId);
+    } else {
+      newSelected.add(bookId);
+    }
+    setSelectedBookIds(newSelected);
+  };
+
+  // 批量操作 - 全选/取消全选
+  const toggleSelectAll = () => {
+    if (selectedBookIds.size === filteredAndSortedBooks.length) {
+      setSelectedBookIds(new Set());
+    } else {
+      setSelectedBookIds(new Set(filteredAndSortedBooks.map((b) => b.id)));
+    }
+  };
+
+  // 批量删除
+  const batchDeleteMutation = useMutation({
+    mutationFn: async (bookIds: string[]) => {
+      for (const bookId of bookIds) {
+        await api.book.delete(bookId);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['books'] });
+      toast.success(`成功删除 ${selectedBookIds.size} 本书籍`);
+      setSelectedBookIds(new Set());
+      setIsBatchMode(false);
+    },
+    onError: (error) => {
+      console.error('Failed to batch delete books:', error);
+      toast.error('批量删除失败');
+    },
+  });
+
+  // 批量添加到书架
+  const batchAddToCollectionMutation = useMutation({
+    mutationFn: async (data: { collectionId: string; bookIds: string[] }) => {
+      for (const bookId of data.bookIds) {
+        await api.collection.addBook({ collectionId: data.collectionId, bookId });
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['collections'] });
+      toast.success(`成功添加 ${selectedBookIds.size} 本书籍到书架`);
+      setSelectedBookIds(new Set());
+      setIsBatchMode(false);
+      setShowCollectionManager(false);
+    },
+    onError: (error) => {
+      console.error('Failed to batch add to collection:', error);
+      toast.error('批量添加到书架失败');
+    },
+  });
+
+  // 批量添加标签
+  const batchAddTagMutation = useMutation({
+    mutationFn: async (data: { tagId: string; bookIds: string[] }) => {
+      for (const bookId of data.bookIds) {
+        await api.tag.addToBook({ bookId, tagId: data.tagId });
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['books'] });
+      queryClient.invalidateQueries({ queryKey: ['tags'] });
+      toast.success(`成功添加标签到 ${selectedBookIds.size} 本书籍`);
+      setSelectedBookIds(new Set());
+      setIsBatchMode(false);
+    },
+    onError: (error) => {
+      console.error('Failed to batch add tag:', error);
+      toast.error('批量添加标签失败');
+    },
+  });
+
+  // 处理批量删除
+  const handleBatchDelete = async () => {
+    const confirmed = await modal.confirm({
+      title: '批量删除书籍',
+      content: (
+        <div>
+          <p className="mb-2">确定要删除选中的 {selectedBookIds.size} 本书籍吗？</p>
+          <p className="text-sm text-gray-500">此操作无法撤销。</p>
+        </div>
+      ),
+    });
+
+    if (confirmed) {
+      batchDeleteMutation.mutate(Array.from(selectedBookIds));
+    }
+  };
+
   // 获取封面 URL
   const getCoverUrl = (book: Book): string => {
     // 如果已经加载了 blob URL
@@ -257,6 +368,39 @@ export function Library() {
           </div>
 
           <div className="flex items-center space-x-3">
+            {/* 批量选择按钮 */}
+            <button
+              onClick={toggleBatchMode}
+              className={`rounded-lg border p-2 transition-colors ${
+                isBatchMode
+                  ? 'border-blue-500 bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'
+                  : 'border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-700'
+              }`}
+              title={isBatchMode ? '退出批量选择' : '批量选择'}
+            >
+              {isBatchMode ? (
+                <X className="h-5 w-5" />
+              ) : (
+                <CheckSquare className="h-5 w-5" />
+              )}
+            </button>
+
+            {/* 批量选择模式下的操作栏 */}
+            {isBatchMode && selectedBookIds.size > 0 && (
+              <>
+                <div className="h-6 w-px bg-gray-300 dark:bg-gray-600" />
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  已选择 {selectedBookIds.size} 本
+                </span>
+                <button
+                  onClick={() => setShowBatchActionMenu(!showBatchActionMenu)}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+                >
+                  批量操作
+                </button>
+              </>
+            )}
+
             {/* 视图切换按钮 */}
             <button
               onClick={toggleViewMode}
@@ -357,13 +501,11 @@ export function Library() {
                 <span>筛选</span>
                 {filterStatus !== 'all' && (
                   <span className="ml-1 rounded-full bg-blue-600 px-1.5 py-0.5 text-xs text-white">
-                    {
-                      {filterStatus === 'unread' ? '未读' :
-                      filterStatus === 'reading' ? '阅读中' :
-                      filterStatus === 'finished' ? '已完成' : ''}
-                    </span>
-                  )}
-                </span>
+                    {filterStatus === 'unread' ? '未读' :
+                    filterStatus === 'reading' ? '阅读中' :
+                    filterStatus === 'finished' ? '已完成' : ''}
+                  </span>
+                )}
                 <ChevronDown className={`h-4 w-4 transition-transform ${showFilterMenu ? 'rotate-180' : ''}`} />
               </button>
 
@@ -447,6 +589,44 @@ export function Library() {
                   </div>
                 </div>
               )}
+
+              {/* 批量操作菜单 */}
+              {showBatchActionMenu && (
+                <div className="absolute right-0 top-full mt-2 w-56 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800 z-10">
+                  <div className="p-2 space-y-1">
+                    <button
+                      onClick={() => {
+                        setShowBatchActionMenu(false);
+                        setShowCollectionManager(true);
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-md text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700 transition-colors flex items-center space-x-2"
+                    >
+                      <FolderCollection className="h-4 w-4" />
+                      <span>添加到书架</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowBatchActionMenu(false);
+                        setShowTagManager(true);
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-md text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700 transition-colors flex items-center space-x-2"
+                    >
+                      <TagIcon className="h-4 w-4" />
+                      <span>添加标签</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowBatchActionMenu(false);
+                        handleBatchDelete();
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-md text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors flex items-center space-x-2"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      <span>删除选中书籍</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <button
@@ -464,12 +644,7 @@ export function Library() {
       {/* 书籍列表 */}
       <div className="flex-1 overflow-auto p-6">
         {isLoading ? (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center">
-              <div className="mb-4 h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent mx-auto" />
-              <p className="text-sm text-gray-500">正在加载...</p>
-            </div>
-          </div>
+          <BookCardSkeleton count={12} viewMode={viewMode} />
         ) : filteredAndSortedBooks.length === 0 && books.length > 0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
@@ -517,11 +692,28 @@ export function Library() {
                 {filteredAndSortedBooks.map((book: Book) => (
               <div
                 key={book.id}
-                onClick={() => handleOpenBook(book.id)}
-                className="group cursor-pointer"
+                onClick={() => !isBatchMode && handleOpenBook(book.id)}
+                className={`group relative cursor-pointer ${isBatchMode ? 'cursor-default' : ''}`}
               >
+                {/* 批量选择复选框 */}
+                {isBatchMode && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleBookSelection(book.id);
+                    }}
+                    className="absolute top-2 left-2 z-10 rounded-full bg-white/90 p-2 shadow-md hover:bg-white dark:bg-gray-800/90 dark:hover:bg-gray-800 transition-colors"
+                  >
+                    {selectedBookIds.has(book.id) ? (
+                      <CheckSquare className="h-5 w-5 text-blue-600" />
+                    ) : (
+                      <Square className="h-5 w-5 text-gray-400" />
+                    )}
+                  </button>
+                )}
+
                 {/* 书籍封面 */}
-                <div className="relative mb-3 aspect-[2/3] overflow-hidden rounded-lg shadow-md transition-all group-hover:shadow-xl">
+                <div className={`relative mb-3 aspect-[2/3] overflow-hidden rounded-lg shadow-md transition-all ${isBatchMode ? '' : 'group-hover:shadow-xl'}`}>
                   <img
                     src={getCoverUrl(book)}
                     alt={book.title}
@@ -615,9 +807,26 @@ export function Library() {
                 {filteredAndSortedBooks.map((book: Book) => (
                   <div
                     key={book.id}
-                    onClick={() => handleOpenBook(book.id)}
-                    className="group flex items-center space-x-4 p-4 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700 transition-all cursor-pointer shadow-sm hover:shadow-md"
+                    onClick={() => !isBatchMode && handleOpenBook(book.id)}
+                    className={`group flex items-center space-x-4 p-4 rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 transition-all ${isBatchMode ? 'cursor-default' : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 shadow-sm hover:shadow-md'}`}
                   >
+                    {/* 批量选择复选框 */}
+                    {isBatchMode && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleBookSelection(book.id);
+                        }}
+                        className="flex-shrink-0"
+                      >
+                        {selectedBookIds.has(book.id) ? (
+                          <CheckSquare className="h-5 w-5 text-blue-600" />
+                        ) : (
+                          <Square className="h-5 w-5 text-gray-400" />
+                        )}
+                      </button>
+                    )}
+
                     {/* 封面 */}
                     <div className="h-16 w-12 flex-shrink-0 overflow-hidden rounded bg-gray-200">
                       <img
@@ -723,7 +932,38 @@ export function Library() {
               </button>
             </div>
             <div className="flex-1 overflow-auto p-6">
-              <TagManager onClose={() => setShowTagManager(false)} />
+              {isBatchMode ? (
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    为选中的 {selectedBookIds.size} 本书籍添加标签
+                  </p>
+                  <TagManager onClose={() => setShowTagManager(false)} />
+                </div>
+              ) : (
+                <TagManager onClose={() => setShowTagManager(false)} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 书架管理弹窗 */}
+      {showCollectionManager && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-lg rounded-lg bg-white shadow-xl dark:bg-gray-800 mx-4 max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-gray-700">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                {isBatchMode ? `添加 ${selectedBookIds.size} 本书到书架` : '书架管理'}
+              </h3>
+              <button
+                onClick={() => setShowCollectionManager(false)}
+                className="rounded p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 dark:hover:text-gray-300 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-6">
+              <CollectionManager onClose={() => setShowCollectionManager(false)} />
             </div>
           </div>
         </div>

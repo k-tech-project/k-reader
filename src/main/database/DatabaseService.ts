@@ -6,7 +6,7 @@ import { app } from 'electron';
 import { join } from 'path';
 import { DB_NAME } from '@shared/constants';
 import { logger } from '@shared/utils/Logger';
-import { DatabaseError, ErrorHandler } from '@shared/utils/ErrorHandler';
+import { DatabaseError } from '@shared/utils/ErrorHandler';
 
 export class DatabaseService {
   private static instance: DatabaseService;
@@ -95,6 +95,8 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_books_title ON books(title);
       CREATE INDEX IF NOT EXISTS idx_books_author ON books(author);
       CREATE INDEX IF NOT EXISTS idx_books_last_read ON books(last_read_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_books_progress ON books(progress);
+      CREATE INDEX IF NOT EXISTS idx_books_added ON books(added_at DESC);
     `);
 
     // 批注表
@@ -120,6 +122,7 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_annotations_book ON annotations(book_id);
       CREATE INDEX IF NOT EXISTS idx_annotations_type ON annotations(type);
       CREATE INDEX IF NOT EXISTS idx_annotations_created ON annotations(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_annotations_book_type ON annotations(book_id, type);
     `);
 
     // 阅读进度表
@@ -160,6 +163,67 @@ export class DatabaseService {
         FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE,
         FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
       );
+    `);
+
+    // 书架表
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS collections (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_collections_name ON collections(name);
+    `);
+
+    // 书架书籍关联表
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS collection_books (
+        collection_id TEXT NOT NULL,
+        book_id TEXT NOT NULL,
+        sort_order INTEGER DEFAULT 0,
+        added_at INTEGER DEFAULT (strftime('%s', 'now')),
+        PRIMARY KEY(collection_id, book_id),
+        FOREIGN KEY(collection_id) REFERENCES collections(id) ON DELETE CASCADE,
+        FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE
+      );
+    `);
+
+    // 生词本表
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS wordbook (
+        id TEXT PRIMARY KEY,
+        word TEXT NOT NULL,
+        translation TEXT,
+        definition TEXT,
+        language TEXT DEFAULT 'en',
+        book_id TEXT,
+        context TEXT,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_wordbook_word ON wordbook(word);
+      CREATE INDEX IF NOT EXISTS idx_wordbook_language ON wordbook(language);
+      CREATE INDEX IF NOT EXISTS idx_wordbook_book ON wordbook(book_id);
+      CREATE INDEX IF NOT EXISTS idx_wordbook_lang_word ON wordbook(language, word);
+    `);
+
+    // 翻译历史表
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS translation_history (
+        id TEXT PRIMARY KEY,
+        source_text TEXT NOT NULL,
+        target_text TEXT NOT NULL,
+        source_lang TEXT NOT NULL,
+        target_lang TEXT NOT NULL,
+        provider TEXT DEFAULT 'auto',
+        created_at INTEGER DEFAULT (strftime('%s', 'now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_translation_history_created ON translation_history(created_at DESC);
     `);
   }
 

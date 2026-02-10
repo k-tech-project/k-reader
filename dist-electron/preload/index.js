@@ -37,8 +37,30 @@ const IPCChannels = {
   // 标签操作
   TAG_CREATE: "tag:create",
   TAG_GET_ALL: "tag:getAll",
+  TAG_GET_BY_BOOK: "tag:getByBook",
+  TAG_UPDATE: "tag:update",
+  TAG_DELETE: "tag:delete",
   TAG_ADD_TO_BOOK: "tag:addToBook",
   TAG_REMOVE_FROM_BOOK: "tag:removeFromBook",
+  // 书架操作
+  COLLECTION_CREATE: "collection:create",
+  COLLECTION_GET_ALL: "collection:getAll",
+  COLLECTION_GET: "collection:get",
+  COLLECTION_UPDATE: "collection:update",
+  COLLECTION_DELETE: "collection:delete",
+  COLLECTION_ADD_BOOK: "collection:addBook",
+  COLLECTION_REMOVE_BOOK: "collection:removeBook",
+  COLLECTION_GET_BOOKS: "collection:getBooks",
+  COLLECTION_GET_BY_BOOK: "collection:getByBook",
+  // 生词本操作
+  WORDBOOK_ADD: "wordbook:add",
+  WORDBOOK_GET_ALL: "wordbook:getAll",
+  WORDBOOK_GET: "wordbook:get",
+  WORDBOOK_UPDATE: "wordbook:update",
+  WORDBOOK_DELETE: "wordbook:delete",
+  WORDBOOK_SEARCH: "wordbook:search",
+  WORDBOOK_GET_BY_BOOK: "wordbook:getByBook",
+  WORDBOOK_GET_STATS: "wordbook:getStats",
   // 设置操作
   SETTINGS_GET: "settings:get",
   SETTINGS_SET: "settings:set",
@@ -101,8 +123,32 @@ const electronAPI = {
   tag: {
     create: (data) => electron.ipcRenderer.invoke(IPCChannels.TAG_CREATE, data),
     getAll: () => electron.ipcRenderer.invoke(IPCChannels.TAG_GET_ALL),
+    getByBook: (bookId) => electron.ipcRenderer.invoke(IPCChannels.TAG_GET_BY_BOOK, bookId),
+    update: (id, updates) => electron.ipcRenderer.invoke(IPCChannels.TAG_UPDATE, id, updates),
+    delete: (id) => electron.ipcRenderer.invoke(IPCChannels.TAG_DELETE, id),
     addToBook: (data) => electron.ipcRenderer.invoke(IPCChannels.TAG_ADD_TO_BOOK, data),
     removeFromBook: (data) => electron.ipcRenderer.invoke(IPCChannels.TAG_REMOVE_FROM_BOOK, data)
+  },
+  collection: {
+    create: (data) => electron.ipcRenderer.invoke(IPCChannels.COLLECTION_CREATE, data),
+    getAll: () => electron.ipcRenderer.invoke(IPCChannels.COLLECTION_GET_ALL),
+    get: (id) => electron.ipcRenderer.invoke(IPCChannels.COLLECTION_GET, id),
+    update: (id, updates) => electron.ipcRenderer.invoke(IPCChannels.COLLECTION_UPDATE, id, updates),
+    delete: (id) => electron.ipcRenderer.invoke(IPCChannels.COLLECTION_DELETE, id),
+    addBook: (data) => electron.ipcRenderer.invoke(IPCChannels.COLLECTION_ADD_BOOK, data),
+    removeBook: (data) => electron.ipcRenderer.invoke(IPCChannels.COLLECTION_REMOVE_BOOK, data),
+    getBooks: (collectionId) => electron.ipcRenderer.invoke(IPCChannels.COLLECTION_GET_BOOKS, collectionId),
+    getByBook: (bookId) => electron.ipcRenderer.invoke(IPCChannels.COLLECTION_GET_BY_BOOK, bookId)
+  },
+  wordbook: {
+    add: (data) => electron.ipcRenderer.invoke(IPCChannels.WORDBOOK_ADD, data),
+    getAll: (options) => electron.ipcRenderer.invoke(IPCChannels.WORDBOOK_GET_ALL, options),
+    get: (id) => electron.ipcRenderer.invoke(IPCChannels.WORDBOOK_GET, id),
+    update: (id, updates) => electron.ipcRenderer.invoke(IPCChannels.WORDBOOK_UPDATE, id, updates),
+    delete: (id) => electron.ipcRenderer.invoke(IPCChannels.WORDBOOK_DELETE, id),
+    search: (query, options) => electron.ipcRenderer.invoke(IPCChannels.WORDBOOK_SEARCH, query, options),
+    getByBook: (bookId) => electron.ipcRenderer.invoke(IPCChannels.WORDBOOK_GET_BY_BOOK, bookId),
+    getStats: () => electron.ipcRenderer.invoke(IPCChannels.WORDBOOK_GET_STATS)
   },
   settings: {
     get: (key) => electron.ipcRenderer.invoke(IPCChannels.SETTINGS_GET, key),

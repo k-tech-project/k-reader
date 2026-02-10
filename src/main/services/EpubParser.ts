@@ -9,7 +9,7 @@ import path from 'path';
 import { readFile } from 'fs/promises';
 import type { TOCItem, SpineItem } from '@shared/types';
 import { logger } from '@shared/utils/Logger';
-import { EpubParseError, ErrorHandler } from '@shared/utils/ErrorHandler';
+import { EpubParseError } from '@shared/utils/ErrorHandler';
 
 export interface EpubMetadata {
   title: string;
@@ -182,8 +182,8 @@ export class EpubParser {
     };
 
     return {
-      title: getTitle(),
-      author: getCreator(),
+      title: getTitle() || 'Unknown Title',
+      author: getCreator() || 'Unknown Author',
       publisher: getPublisher(),
       publishDate: getDate(),
       isbn: getISBN(),

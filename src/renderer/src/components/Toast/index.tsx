@@ -3,7 +3,7 @@
  * 用于显示成功、错误、警告和信息提示
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import { CheckCircle, XCircle, AlertTriangle, Info, X } from '../../utils/icons';
 
@@ -40,7 +40,7 @@ export const useToastStore = create<ToastStore>((set) => ({
     }));
 
     // 自动移除
-    if (newToast.duration > 0) {
+    if (newToast.duration && newToast.duration > 0) {
       setTimeout(() => {
         set((state) => ({
           toasts: state.toasts.filter((t) => t.id !== id),
@@ -73,8 +73,34 @@ export const toast = {
     useToastStore.getState().addToast({ type: 'info', message, duration }),
 };
 
+// showToast 函数（兼容旧的调用方式）
+export const showToast = (options: Omit<Toast, 'id'>) => {
+  useToastStore.getState().addToast(options);
+};
+
 // Toast 项组件
 function ToastItem({ toast, onRemove }: { toast: Toast; onRemove: () => void }) {
+  const [progress, setProgress] = useState(100);
+
+  useEffect(() => {
+    if (toast.duration && toast.duration > 0) {
+      const interval = 50;
+      const step = 100 / (toast.duration / interval);
+      const timer = setInterval(() => {
+        setProgress((prev) => {
+          if (prev <= 0) {
+            clearInterval(timer);
+            return 0;
+          }
+          return prev - step;
+        });
+      }, interval);
+
+      return () => clearInterval(timer);
+    }
+    return undefined;
+  }, [toast.duration]);
+
   const icons = {
     success: CheckCircle,
     error: XCircle,
@@ -89,20 +115,43 @@ function ToastItem({ toast, onRemove }: { toast: Toast; onRemove: () => void }) 
     info: 'bg-blue-50 text-blue-800 border-blue-200 dark:bg-blue-900/20 dark:text-blue-200 dark:border-blue-800',
   };
 
+  const progressColors = {
+    success: 'bg-green-500 dark:bg-green-400',
+    error: 'bg-red-500 dark:bg-red-400',
+    warning: 'bg-yellow-500 dark:bg-yellow-400',
+    info: 'bg-blue-500 dark:bg-blue-400',
+  };
+
   const Icon = icons[toast.type];
 
   return (
     <div
-      className={`mb-2 flex items-start rounded-lg border p-4 shadow-lg ${colors[toast.type]} animate-in slide-in-from-right duration-300`}
+      className={`relative mb-2 overflow-hidden rounded-lg border p-4 shadow-lg transition-all duration-300 ${colors[toast.type]} animate-in slide-in-from-right duration-300`}
+      style={{
+        animation: 'slideIn 0.3s ease-out',
+      }}
     >
-      <Icon className="mr-3 h-5 w-5 flex-shrink-0 mt-0.5" />
-      <p className="flex-1 text-sm font-medium">{toast.message}</p>
-      <button
-        onClick={onRemove}
-        className="ml-3 flex-shrink-0 rounded hover:bg-black/5 dark:hover:bg-white/5 p-1 transition-colors"
-      >
-        <X className="h-4 w-4" />
-      </button>
+      {/* 进度条 */}
+      {toast.duration && toast.duration > 0 && (
+        <div className="absolute bottom-0 left-0 h-1 w-full bg-black/10 dark:bg-white/10">
+          <div
+            className={`h-full transition-all duration-75 ease-linear ${progressColors[toast.type]}`}
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      )}
+
+      <div className="flex items-start">
+        <Icon className="mr-3 h-5 w-5 flex-shrink-0 mt-0.5" />
+        <p className="flex-1 text-sm font-medium pr-2">{toast.message}</p>
+        <button
+          onClick={onRemove}
+          className="ml-3 flex-shrink-0 rounded hover:bg-black/5 dark:hover:bg-white/5 p-1 transition-colors"
+          aria-label="关闭"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
     </div>
   );
 }

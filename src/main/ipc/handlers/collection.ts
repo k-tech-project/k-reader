@@ -2,7 +2,7 @@
  * 书架IPC处理器
  */
 import type { Collection } from '@shared/types';
-import { DatabaseService } from '../database/DatabaseService';
+import { DatabaseService } from '@main/database/DatabaseService';
 import { randomUUID } from 'crypto';
 
 export class CollectionHandlers {
@@ -17,7 +17,7 @@ export class CollectionHandlers {
       id: randomUUID(),
       name: data.name,
       description: data.description || '',
-      createdAt: now * 1000,
+      createdAt: new Date(now * 1000),
     };
 
     db.execute(

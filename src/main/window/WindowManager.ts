@@ -40,7 +40,7 @@ export class WindowManager {
 
     // macOS 不需要设置 icon，会使用 app bundle 的图标
     // Windows/Linux 需要设置 icon
-    let icon = undefined;
+    let icon: Electron.NativeImage | undefined = undefined;
     if (process.platform !== 'darwin') {
       const iconPath = join(process.resourcesPath || join(__dirname, '../../..'), 'resources', 'icon.png');
 

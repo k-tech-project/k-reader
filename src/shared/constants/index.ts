@@ -66,6 +66,16 @@ export const IPCChannels = {
   COLLECTION_GET_BOOKS: 'collection:getBooks',
   COLLECTION_GET_BY_BOOK: 'collection:getByBook',
 
+  // 生词本操作
+  WORDBOOK_ADD: 'wordbook:add',
+  WORDBOOK_GET_ALL: 'wordbook:getAll',
+  WORDBOOK_GET: 'wordbook:get',
+  WORDBOOK_UPDATE: 'wordbook:update',
+  WORDBOOK_DELETE: 'wordbook:delete',
+  WORDBOOK_SEARCH: 'wordbook:search',
+  WORDBOOK_GET_BY_BOOK: 'wordbook:getByBook',
+  WORDBOOK_GET_STATS: 'wordbook:getStats',
+
   // 设置操作
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',

@@ -8,6 +8,7 @@ const Database = require("better-sqlite3");
 const JSZip = require("jszip");
 const xml2js = require("xml2js");
 const promises = require("fs/promises");
+const crypto = require("crypto");
 let store$1 = null;
 function getStore$1() {
   if (!store$1) {
@@ -145,8 +146,30 @@ const IPCChannels = {
   // 标签操作
   TAG_CREATE: "tag:create",
   TAG_GET_ALL: "tag:getAll",
+  TAG_GET_BY_BOOK: "tag:getByBook",
+  TAG_UPDATE: "tag:update",
+  TAG_DELETE: "tag:delete",
   TAG_ADD_TO_BOOK: "tag:addToBook",
   TAG_REMOVE_FROM_BOOK: "tag:removeFromBook",
+  // 书架操作
+  COLLECTION_CREATE: "collection:create",
+  COLLECTION_GET_ALL: "collection:getAll",
+  COLLECTION_GET: "collection:get",
+  COLLECTION_UPDATE: "collection:update",
+  COLLECTION_DELETE: "collection:delete",
+  COLLECTION_ADD_BOOK: "collection:addBook",
+  COLLECTION_REMOVE_BOOK: "collection:removeBook",
+  COLLECTION_GET_BOOKS: "collection:getBooks",
+  COLLECTION_GET_BY_BOOK: "collection:getByBook",
+  // 生词本操作
+  WORDBOOK_ADD: "wordbook:add",
+  WORDBOOK_GET_ALL: "wordbook:getAll",
+  WORDBOOK_GET: "wordbook:get",
+  WORDBOOK_UPDATE: "wordbook:update",
+  WORDBOOK_DELETE: "wordbook:delete",
+  WORDBOOK_SEARCH: "wordbook:search",
+  WORDBOOK_GET_BY_BOOK: "wordbook:getByBook",
+  WORDBOOK_GET_STATS: "wordbook:getStats",
   // 设置操作
   SETTINGS_GET: "settings:get",
   SETTINGS_SET: "settings:set",
@@ -466,11 +489,12 @@ var LogLevel = /* @__PURE__ */ ((LogLevel2) => {
   return LogLevel2;
 })(LogLevel || {});
 class Logger {
+  static instance;
+  logLevel = 1;
+  logs = [];
+  maxLogs = 1e3;
   // 最多保留1000条日志
   constructor() {
-    this.logLevel = 1;
-    this.logs = [];
-    this.maxLogs = 1e3;
     if (process.env.NODE_ENV === "development") {
       this.logLevel = 0;
     }
@@ -682,6 +706,8 @@ class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_books_title ON books(title);
       CREATE INDEX IF NOT EXISTS idx_books_author ON books(author);
       CREATE INDEX IF NOT EXISTS idx_books_last_read ON books(last_read_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_books_progress ON books(progress);
+      CREATE INDEX IF NOT EXISTS idx_books_added ON books(added_at DESC);
     `);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS annotations (
@@ -705,6 +731,7 @@ class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_annotations_book ON annotations(book_id);
       CREATE INDEX IF NOT EXISTS idx_annotations_type ON annotations(type);
       CREATE INDEX IF NOT EXISTS idx_annotations_created ON annotations(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_annotations_book_type ON annotations(book_id, type);
     `);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS reading_progress (
@@ -739,6 +766,59 @@ class DatabaseService {
         FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE,
         FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
       );
+    `);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS collections (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_collections_name ON collections(name);
+    `);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS collection_books (
+        collection_id TEXT NOT NULL,
+        book_id TEXT NOT NULL,
+        sort_order INTEGER DEFAULT 0,
+        added_at INTEGER DEFAULT (strftime('%s', 'now')),
+        PRIMARY KEY(collection_id, book_id),
+        FOREIGN KEY(collection_id) REFERENCES collections(id) ON DELETE CASCADE,
+        FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE
+      );
+    `);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS wordbook (
+        id TEXT PRIMARY KEY,
+        word TEXT NOT NULL,
+        translation TEXT,
+        definition TEXT,
+        language TEXT DEFAULT 'en',
+        book_id TEXT,
+        context TEXT,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_wordbook_word ON wordbook(word);
+      CREATE INDEX IF NOT EXISTS idx_wordbook_language ON wordbook(language);
+      CREATE INDEX IF NOT EXISTS idx_wordbook_book ON wordbook(book_id);
+      CREATE INDEX IF NOT EXISTS idx_wordbook_lang_word ON wordbook(language, word);
+    `);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS translation_history (
+        id TEXT PRIMARY KEY,
+        source_text TEXT NOT NULL,
+        target_text TEXT NOT NULL,
+        source_lang TEXT NOT NULL,
+        target_lang TEXT NOT NULL,
+        provider TEXT DEFAULT 'auto',
+        created_at INTEGER DEFAULT (strftime('%s', 'now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_translation_history_created ON translation_history(created_at DESC);
     `);
   }
   /**
@@ -1021,8 +1101,8 @@ class EpubParser {
       return void 0;
     };
     return {
-      title: getTitle(),
-      author: getCreator(),
+      title: getTitle() || "Unknown Title",
+      author: getCreator() || "Unknown Author",
       publisher: getPublisher(),
       publishDate: getDate(),
       isbn: getISBN(),
@@ -1654,8 +1734,65 @@ class AnnotationHandlers {
           error: "No annotations to export"
         };
       }
-      const data = JSON.stringify(annotations, null, 2);
-      logger.info(`Exported ${annotations.length} annotations for book ${options.bookId}`, "AnnotationHandlers");
+      let data;
+      if (options.format === "json") {
+        data = JSON.stringify(annotations, null, 2);
+      } else if (options.format === "markdown") {
+        const highlights = annotations.filter((a) => a.type === "highlight");
+        const bookmarks = annotations.filter((a) => a.type === "bookmark");
+        let markdown = "# 阅读批注导出\n\n";
+        markdown += `导出时间: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
+
+`;
+        if (highlights.length > 0) {
+          markdown += `## 高亮批注 (${highlights.length})
+
+`;
+          highlights.forEach((annotation, index) => {
+            markdown += `### ${index + 1}. ${annotation.selectedText?.substring(0, 30) || "无标题"}...
+
+`;
+            if (annotation.selectedText) {
+              markdown += `> ${annotation.selectedText}
+
+`;
+            }
+            if (annotation.note) {
+              markdown += `**笔记**: ${annotation.note}
+
+`;
+            }
+            markdown += `- 位置: ${annotation.chapterTitle || "未知"}
+`;
+            markdown += `- 时间: ${new Date(annotation.createdAt).toLocaleString("zh-CN")}
+`;
+            if (annotation.color) {
+              markdown += `- 颜色: ${annotation.color}
+`;
+            }
+            markdown += "\n---\n\n";
+          });
+        }
+        if (bookmarks.length > 0) {
+          markdown += `## 书签 (${bookmarks.length})
+
+`;
+          bookmarks.forEach((bookmark, index) => {
+            markdown += `${index + 1}. ${bookmark.chapterTitle || "未知位置"}
+`;
+            markdown += `   - 时间: ${new Date(bookmark.createdAt).toLocaleString("zh-CN")}
+
+`;
+          });
+        }
+        data = markdown;
+      } else {
+        return {
+          success: false,
+          error: "Unsupported format"
+        };
+      }
+      logger.info(`Exported ${annotations.length} annotations for book ${options.bookId} in ${options.format} format`, "AnnotationHandlers");
       return {
         success: true,
         data
@@ -1834,24 +1971,252 @@ class TagHandlers {
   /**
    * 创建标签
    */
-  static async create(_data) {
-    throw new Error("Not implemented");
+  static async create(data) {
+    const db = DatabaseService.getInstance();
+    const now = Math.floor(Date.now() / 1e3);
+    const tag = {
+      id: crypto.randomUUID(),
+      name: data.name,
+      color: data.color || "#3B82F6",
+      createdAt: new Date(now * 1e3)
+    };
+    db.execute(
+      `INSERT INTO tags (id, name, color, created_at) VALUES (?, ?, ?, ?)`,
+      [tag.id, tag.name, tag.color, now]
+    );
+    return tag;
   }
   /**
    * 获取所有标签
    */
   static async getAll() {
-    return [];
+    const db = DatabaseService.getInstance();
+    const rows = db.query(`SELECT * FROM tags ORDER BY name ASC`);
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      color: row.color,
+      createdAt: new Date(row.created_at * 1e3)
+    }));
+  }
+  /**
+   * 更新标签
+   */
+  static async update(id, updates) {
+    const db = DatabaseService.getInstance();
+    const fields = [];
+    const params = [];
+    if (updates.name) {
+      fields.push("name = ?");
+      params.push(updates.name);
+    }
+    if (updates.color) {
+      fields.push("color = ?");
+      params.push(updates.color);
+    }
+    if (fields.length === 0) return;
+    params.push(id);
+    db.execute(`UPDATE tags SET ${fields.join(", ")} WHERE id = ?`, params);
+  }
+  /**
+   * 删除标签
+   */
+  static async delete(id) {
+    const db = DatabaseService.getInstance();
+    db.execute(`DELETE FROM book_tags WHERE tag_id = ?`, [id]);
+    db.execute(`DELETE FROM tags WHERE id = ?`, [id]);
   }
   /**
    * 添加标签到书籍
    */
-  static async addToBook(_data) {
+  static async addToBook(data) {
+    const db = DatabaseService.getInstance();
+    const existing = db.execute(
+      `SELECT 1 FROM book_tags WHERE book_id = ? AND tag_id = ?`,
+      [data.bookId, data.tagId]
+    );
+    if (existing) return;
+    db.execute(
+      `INSERT INTO book_tags (book_id, tag_id) VALUES (?, ?)`,
+      [data.bookId, data.tagId]
+    );
   }
   /**
    * 从书籍移除标签
    */
-  static async removeFromBook(_data) {
+  static async removeFromBook(data) {
+    const db = DatabaseService.getInstance();
+    db.execute(
+      `DELETE FROM book_tags WHERE book_id = ? AND tag_id = ?`,
+      [data.bookId, data.tagId]
+    );
+  }
+  /**
+   * 获取书籍的标签
+   */
+  static async getByBook(bookId) {
+    const db = DatabaseService.getInstance();
+    const rows = db.query(`
+      SELECT t.* FROM tags t
+      INNER JOIN book_tags bt ON t.id = bt.tag_id
+      WHERE bt.book_id = ?
+      ORDER BY t.name ASC
+    `, [bookId]);
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      color: row.color,
+      createdAt: new Date(row.created_at * 1e3)
+    }));
+  }
+}
+class CollectionHandlers {
+  /**
+   * 创建书架
+   */
+  static async create(data) {
+    const db = DatabaseService.getInstance();
+    const now = Math.floor(Date.now() / 1e3);
+    const collection = {
+      id: crypto.randomUUID(),
+      name: data.name,
+      description: data.description || "",
+      createdAt: new Date(now * 1e3)
+    };
+    db.execute(
+      `INSERT INTO collections (id, name, description, created_at) VALUES (?, ?, ?, ?)`,
+      [collection.id, collection.name, collection.description, now]
+    );
+    return collection;
+  }
+  /**
+   * 获取所有书架
+   */
+  static async getAll() {
+    const db = DatabaseService.getInstance();
+    const rows = db.execute(`
+      SELECT c.*,
+        COUNT(cb.book_id) as book_count
+      FROM collections c
+      LEFT JOIN collection_books cb ON c.id = cb.collection_id
+      GROUP BY c.id
+      ORDER BY c.name ASC
+    `).all();
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description || "",
+      createdAt: new Date(row.created_at * 1e3),
+      bookCount: row.book_count || 0
+    }));
+  }
+  /**
+   * 获取单个书架
+   */
+  static async get(id) {
+    const db = DatabaseService.getInstance();
+    const row = db.execute(`
+      SELECT c.*,
+        COUNT(cb.book_id) as book_count
+      FROM collections c
+      LEFT JOIN collection_books cb ON c.id = cb.collection_id
+      WHERE c.id = ?
+      GROUP BY c.id
+    `, [id]).get();
+    if (!row) return null;
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description || "",
+      createdAt: new Date(row.created_at * 1e3),
+      bookCount: row.book_count || 0
+    };
+  }
+  /**
+   * 更新书架
+   */
+  static async update(id, updates) {
+    const db = DatabaseService.getInstance();
+    const fields = [];
+    const params = [];
+    if (updates.name !== void 0) {
+      fields.push("name = ?");
+      params.push(updates.name);
+    }
+    if (updates.description !== void 0) {
+      fields.push("description = ?");
+      params.push(updates.description);
+    }
+    if (fields.length === 0) return;
+    params.push(id);
+    db.execute(`UPDATE collections SET ${fields.join(", ")} WHERE id = ?`, params);
+  }
+  /**
+   * 删除书架
+   */
+  static async delete(id) {
+    const db = DatabaseService.getInstance();
+    db.execute(`DELETE FROM collection_books WHERE collection_id = ?`, [id]);
+    db.execute(`DELETE FROM collections WHERE id = ?`, [id]);
+  }
+  /**
+   * 添加书籍到书架
+   */
+  static async addBook(data) {
+    const db = DatabaseService.getInstance();
+    const existing = db.execute(
+      `SELECT 1 FROM collection_books WHERE collection_id = ? AND book_id = ?`,
+      [data.collectionId, data.bookId]
+    );
+    if (existing) return;
+    db.execute(
+      `INSERT INTO collection_books (collection_id, book_id) VALUES (?, ?)`,
+      [data.collectionId, data.bookId]
+    );
+  }
+  /**
+   * 从书架移除书籍
+   */
+  static async removeBook(data) {
+    const db = DatabaseService.getInstance();
+    db.execute(
+      `DELETE FROM collection_books WHERE collection_id = ? AND book_id = ?`,
+      [data.collectionId, data.bookId]
+    );
+  }
+  /**
+   * 获取书架的书籍
+   */
+  static async getBooks(collectionId) {
+    const db = DatabaseService.getInstance();
+    const rows = db.execute(`
+      SELECT book_id
+      FROM collection_books
+      WHERE collection_id = ?
+      ORDER BY added_at DESC
+    `, [collectionId]).all();
+    return rows.map((row) => row.book_id);
+  }
+  /**
+   * 获取书籍所属的书架
+   */
+  static async getByBook(bookId) {
+    const db = DatabaseService.getInstance();
+    const rows = db.execute(`
+      SELECT c.*
+      FROM collections c
+      INNER JOIN collection_books cb ON c.id = cb.collection_id
+      WHERE cb.book_id = ?
+      ORDER BY c.name ASC
+    `, [bookId]).all();
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description || "",
+      createdAt: new Date(row.created_at * 1e3),
+      bookCount: 0
+      // 不需要在这个查询中计算
+    }));
   }
 }
 let store = null;
@@ -1952,6 +2317,163 @@ class SystemHandlers {
     };
   }
 }
+class WordBookHandlers {
+  /**
+   * 添加生词
+   */
+  static async add(data) {
+    const db = DatabaseService.getInstance();
+    const now = Math.floor(Date.now() / 1e3);
+    const entry = {
+      id: crypto.randomUUID(),
+      word: data.word,
+      translation: data.translation || "",
+      definition: data.definition || "",
+      language: data.language || "en",
+      bookId: data.bookId,
+      context: data.context || "",
+      createdAt: new Date(now * 1e3)
+    };
+    try {
+      db.execute(
+        `INSERT INTO wordbook (id, word, translation, definition, language, book_id, context, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [entry.id, entry.word, entry.translation, entry.definition, entry.language, entry.bookId, entry.context, now]
+      );
+      logger.info(`Added word to wordbook: ${entry.word}`);
+      return entry;
+    } catch (error) {
+      logger.error("Failed to add word to wordbook", "WordBookHandlers", error);
+      throw error;
+    }
+  }
+  /**
+   * 获取所有生词
+   */
+  static async getAll(options) {
+    const db = DatabaseService.getInstance();
+    let sql = "SELECT * FROM wordbook";
+    const params = [];
+    const conditions = [];
+    if (options?.language) {
+      conditions.push("language = ?");
+      params.push(options.language);
+    }
+    if (options?.bookId) {
+      conditions.push("book_id = ?");
+      params.push(options.bookId);
+    }
+    if (conditions.length > 0) {
+      sql += " WHERE " + conditions.join(" AND ");
+    }
+    sql += " ORDER BY created_at DESC";
+    const rows = db.query(sql, params);
+    return rows.map((row) => ({
+      id: row.id,
+      word: row.word,
+      translation: row.translation || "",
+      definition: row.definition || "",
+      language: row.language || "en",
+      bookId: row.book_id,
+      context: row.context || "",
+      createdAt: new Date(row.created_at * 1e3)
+    }));
+  }
+  /**
+   * 获取单个生词
+   */
+  static async get(id) {
+    const db = DatabaseService.getInstance();
+    const row = db.execute("SELECT * FROM wordbook WHERE id = ?", [id]).get();
+    if (!row) return null;
+    return {
+      id: row.id,
+      word: row.word,
+      translation: row.translation || "",
+      definition: row.definition || "",
+      language: row.language || "en",
+      bookId: row.book_id,
+      context: row.context || "",
+      createdAt: new Date(row.created_at * 1e3)
+    };
+  }
+  /**
+   * 更新生词
+   */
+  static async update(id, updates) {
+    const db = DatabaseService.getInstance();
+    const fields = [];
+    const params = [];
+    if (updates.translation !== void 0) {
+      fields.push("translation = ?");
+      params.push(updates.translation);
+    }
+    if (updates.definition !== void 0) {
+      fields.push("definition = ?");
+      params.push(updates.definition);
+    }
+    if (updates.context !== void 0) {
+      fields.push("context = ?");
+      params.push(updates.context);
+    }
+    if (fields.length === 0) return;
+    params.push(id);
+    db.execute(`UPDATE wordbook SET ${fields.join(", ")} WHERE id = ?`, params);
+    logger.info(`Updated word in wordbook: ${id}`);
+  }
+  /**
+   * 删除生词
+   */
+  static async delete(id) {
+    const db = DatabaseService.getInstance();
+    db.execute("DELETE FROM wordbook WHERE id = ?", [id]);
+    logger.info(`Deleted word from wordbook: ${id}`);
+  }
+  /**
+   * 搜索生词
+   */
+  static async search(query, options) {
+    const db = DatabaseService.getInstance();
+    let sql = "SELECT * FROM wordbook WHERE word LIKE ?";
+    const params = [`%${query}%`];
+    if (options?.language) {
+      sql += " AND language = ?";
+      params.push(options.language);
+    }
+    sql += " ORDER BY created_at DESC";
+    const rows = db.query(sql, params);
+    return rows.map((row) => ({
+      id: row.id,
+      word: row.word,
+      translation: row.translation || "",
+      definition: row.definition || "",
+      language: row.language || "en",
+      bookId: row.book_id,
+      context: row.context || "",
+      createdAt: new Date(row.created_at * 1e3)
+    }));
+  }
+  /**
+   * 按书籍获取生词
+   */
+  static async getByBook(bookId) {
+    return this.getAll({ bookId });
+  }
+  /**
+   * 获取统计信息
+   */
+  static async getStats() {
+    const db = DatabaseService.getInstance();
+    const totalRow = db.queryOne("SELECT COUNT(*) as count FROM wordbook");
+    const totalCount = totalRow?.count || 0;
+    const langRows = db.query("SELECT language, COUNT(*) as count FROM wordbook GROUP BY language");
+    const byLanguage = {};
+    for (const row of langRows) {
+      byLanguage[row.language] = row.count;
+    }
+    return { totalCount, byLanguage };
+  }
+}
 class IPCHandlers {
   /**
    * 注册所有IPC处理器
@@ -1963,6 +2485,8 @@ class IPCHandlers {
     this.registerAnnotationHandlers();
     this.registerProgressHandlers();
     this.registerTagHandlers();
+    this.registerCollectionHandlers();
+    this.registerWordBookHandlers();
     this.registerSettingsHandlers();
     this.registerDatabaseHandlers();
     this.registerSystemHandlers();
@@ -2091,11 +2615,81 @@ class IPCHandlers {
     electron.ipcMain.handle(IPCChannels.TAG_GET_ALL, () => {
       return TagHandlers.getAll();
     });
+    electron.ipcMain.handle(IPCChannels.TAG_GET_BY_BOOK, (_event, bookId) => {
+      return TagHandlers.getByBook(bookId);
+    });
+    electron.ipcMain.handle(IPCChannels.TAG_UPDATE, (_event, id, updates) => {
+      return TagHandlers.update(id, updates);
+    });
+    electron.ipcMain.handle(IPCChannels.TAG_DELETE, (_event, id) => {
+      return TagHandlers.delete(id);
+    });
     electron.ipcMain.handle(IPCChannels.TAG_ADD_TO_BOOK, (_event, data) => {
       return TagHandlers.addToBook(data);
     });
     electron.ipcMain.handle(IPCChannels.TAG_REMOVE_FROM_BOOK, (_event, data) => {
       return TagHandlers.removeFromBook(data);
+    });
+  }
+  /**
+   * 注册书架相关处理器
+   */
+  static registerCollectionHandlers() {
+    electron.ipcMain.handle(IPCChannels.COLLECTION_CREATE, (_event, data) => {
+      return CollectionHandlers.create(data);
+    });
+    electron.ipcMain.handle(IPCChannels.COLLECTION_GET_ALL, () => {
+      return CollectionHandlers.getAll();
+    });
+    electron.ipcMain.handle(IPCChannels.COLLECTION_GET, (_event, id) => {
+      return CollectionHandlers.get(id);
+    });
+    electron.ipcMain.handle(IPCChannels.COLLECTION_UPDATE, (_event, id, updates) => {
+      return CollectionHandlers.update(id, updates);
+    });
+    electron.ipcMain.handle(IPCChannels.COLLECTION_DELETE, (_event, id) => {
+      return CollectionHandlers.delete(id);
+    });
+    electron.ipcMain.handle(IPCChannels.COLLECTION_ADD_BOOK, (_event, data) => {
+      return CollectionHandlers.addBook(data);
+    });
+    electron.ipcMain.handle(IPCChannels.COLLECTION_REMOVE_BOOK, (_event, data) => {
+      return CollectionHandlers.removeBook(data);
+    });
+    electron.ipcMain.handle(IPCChannels.COLLECTION_GET_BOOKS, (_event, collectionId) => {
+      return CollectionHandlers.getBooks(collectionId);
+    });
+    electron.ipcMain.handle(IPCChannels.COLLECTION_GET_BY_BOOK, (_event, bookId) => {
+      return CollectionHandlers.getByBook(bookId);
+    });
+  }
+  /**
+   * 注册生词本相关处理器
+   */
+  static registerWordBookHandlers() {
+    electron.ipcMain.handle(IPCChannels.WORDBOOK_ADD, (_event, data) => {
+      return WordBookHandlers.add(data);
+    });
+    electron.ipcMain.handle(IPCChannels.WORDBOOK_GET_ALL, (_event, options) => {
+      return WordBookHandlers.getAll(options);
+    });
+    electron.ipcMain.handle(IPCChannels.WORDBOOK_GET, (_event, id) => {
+      return WordBookHandlers.get(id);
+    });
+    electron.ipcMain.handle(IPCChannels.WORDBOOK_UPDATE, (_event, id, updates) => {
+      return WordBookHandlers.update(id, updates);
+    });
+    electron.ipcMain.handle(IPCChannels.WORDBOOK_DELETE, (_event, id) => {
+      return WordBookHandlers.delete(id);
+    });
+    electron.ipcMain.handle(IPCChannels.WORDBOOK_SEARCH, (_event, query, options) => {
+      return WordBookHandlers.search(query, options);
+    });
+    electron.ipcMain.handle(IPCChannels.WORDBOOK_GET_BY_BOOK, (_event, bookId) => {
+      return WordBookHandlers.getByBook(bookId);
+    });
+    electron.ipcMain.handle(IPCChannels.WORDBOOK_GET_STATS, () => {
+      return WordBookHandlers.getStats();
     });
   }
   /**
@@ -2177,7 +2771,7 @@ electron.app.whenReady().then(async () => {
   if (process.platform === "win32") {
     electron.app.setAppUserModelId("com.kreader.app");
   }
-  if (process.platform === "darwin" && isDev) {
+  if (process.platform === "darwin" && isDev && electron.app.dock) {
     const iconPath = path.join(process.cwd(), "resources", "icon.png");
     console.log("[Main] Looking for icon at:", iconPath);
     console.log("[Main] Icon exists:", fs.existsSync(iconPath));

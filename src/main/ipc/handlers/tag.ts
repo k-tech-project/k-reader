@@ -2,7 +2,7 @@
  * 标签IPC处理器
  */
 import type { Tag } from '@shared/types';
-import { DatabaseService } from '../database/DatabaseService';
+import { DatabaseService } from '@main/database/DatabaseService';
 import { randomUUID } from 'crypto';
 
 export class TagHandlers {
@@ -17,7 +17,7 @@ export class TagHandlers {
       id: randomUUID(),
       name: data.name,
       color: data.color || '#3B82F6',
-      createdAt: now * 1000,
+      createdAt: new Date(now * 1000),
     };
 
     db.execute(
@@ -34,7 +34,7 @@ export class TagHandlers {
   static async getAll(): Promise<Tag[]> {
     const db = DatabaseService.getInstance();
 
-    const rows = db.execute(`SELECT * FROM tags ORDER BY name ASC`).all() as any[];
+    const rows = db.query(`SELECT * FROM tags ORDER BY name ASC`) as any[];
 
     return rows.map((row) => ({
       id: row.id,
@@ -119,12 +119,12 @@ export class TagHandlers {
   static async getByBook(bookId: string): Promise<Tag[]> {
     const db = DatabaseService.getInstance();
 
-    const rows = db.execute(`
+    const rows = db.query(`
       SELECT t.* FROM tags t
       INNER JOIN book_tags bt ON t.id = bt.tag_id
       WHERE bt.book_id = ?
       ORDER BY t.name ASC
-    `, [bookId]).all() as any[];
+    `, [bookId]) as any[];
 
     return rows.map((row) => ({
       id: row.id,

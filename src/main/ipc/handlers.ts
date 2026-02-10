@@ -13,6 +13,7 @@ import { CollectionHandlers } from './handlers/collection';
 import { SettingsHandlers } from './handlers/settings';
 import { DatabaseHandlers } from './handlers/database';
 import { SystemHandlers } from './handlers/system';
+import { WordBookHandlers } from './handlers/wordbook';
 
 export class IPCHandlers {
   /**
@@ -26,6 +27,7 @@ export class IPCHandlers {
     this.registerProgressHandlers();
     this.registerTagHandlers();
     this.registerCollectionHandlers();
+    this.registerWordBookHandlers();
     this.registerSettingsHandlers();
     this.registerDatabaseHandlers();
     this.registerSystemHandlers();
@@ -244,6 +246,43 @@ export class IPCHandlers {
 
     ipcMain.handle(IPCChannels.COLLECTION_GET_BY_BOOK, (_event, bookId) => {
       return CollectionHandlers.getByBook(bookId);
+    });
+  }
+
+  /**
+   * 注册生词本相关处理器
+   */
+  private static registerWordBookHandlers(): void {
+    ipcMain.handle(IPCChannels.WORDBOOK_ADD, (_event, data) => {
+      return WordBookHandlers.add(data);
+    });
+
+    ipcMain.handle(IPCChannels.WORDBOOK_GET_ALL, (_event, options) => {
+      return WordBookHandlers.getAll(options);
+    });
+
+    ipcMain.handle(IPCChannels.WORDBOOK_GET, (_event, id) => {
+      return WordBookHandlers.get(id);
+    });
+
+    ipcMain.handle(IPCChannels.WORDBOOK_UPDATE, (_event, id, updates) => {
+      return WordBookHandlers.update(id, updates);
+    });
+
+    ipcMain.handle(IPCChannels.WORDBOOK_DELETE, (_event, id) => {
+      return WordBookHandlers.delete(id);
+    });
+
+    ipcMain.handle(IPCChannels.WORDBOOK_SEARCH, (_event, query, options) => {
+      return WordBookHandlers.search(query, options);
+    });
+
+    ipcMain.handle(IPCChannels.WORDBOOK_GET_BY_BOOK, (_event, bookId) => {
+      return WordBookHandlers.getByBook(bookId);
+    });
+
+    ipcMain.handle(IPCChannels.WORDBOOK_GET_STATS, () => {
+      return WordBookHandlers.getStats();
     });
   }
 

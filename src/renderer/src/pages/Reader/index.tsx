@@ -9,9 +9,11 @@ import { useElectronAPI } from '../../hooks/useElectronAPI';
 import type { ReaderLocation } from '../../modules/reader/services/EpubReader';
 import type { ReaderTheme } from '../../modules/reader/types/reader.types';
 import { PRESET_THEMES, PAGE_ANIMATIONS, type PageAnimationType } from '../../modules/reader/types/reader.types';
-import { ArrowLeft, ChevronLeft, ChevronRight, List, Settings, Type, Palette, Bookmark, MapPin, Search, X, Maximize } from '../../utils/icons';
+import { ArrowLeft, ChevronLeft, ChevronRight, List, Settings, Type, Palette, Bookmark, MapPin, Search, X, Maximize, Speaker } from '../../utils/icons';
 import { toast } from '../../components/Toast';
 import { modal } from '../../components/Modal';
+import { TranslationPopup } from '../../components/TranslationPopup';
+import { TTSPlayer } from '../../components/TTSPlayer';
 
 export function Reader() {
   const { bookId } = useParams<{ bookId: string }>();
@@ -45,6 +47,14 @@ export function Reader() {
   const [highlightColor, setHighlightColor] = useState<string>('yellow');
   const [editingHighlight, setEditingHighlight] = useState<any | null>(null);
   const [showEditDialog, setShowEditDialog] = useState(false);
+
+  // 翻译弹窗状态
+  const [showTranslationPopup, setShowTranslationPopup] = useState(false);
+  const [translationPosition, setTranslationPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // TTS状态
+  const [showTTSPlayer, setShowTTSPlayer] = useState(false);
+  const [ttsText, setTTSText] = useState('');
 
   // 阅读器设置
   const [fontSize, setFontSize] = useState(16);
@@ -536,12 +546,29 @@ export function Reader() {
   const handleTextSelection = () => {
     const selection = window.getSelection();
     if (selection && selection.toString().trim().length > 0) {
-      const text = selection.toString();
+      const text = selection.toString().trim();
       setSelectedText(text);
-      const cfi = viewerRef.current?.getSelectionCFI();
-      if (cfi) {
-        setSelectionRange(cfi);
-        setShowAnnotationMenu(true);
+
+      // 获取选择位置用于定位弹窗
+      const range = selection.getRangeAt(0);
+      if (range) {
+        const rect = range.getBoundingClientRect();
+        setTranslationPosition({
+          x: rect.left + rect.width / 2 - 160, // 居中显示
+          y: rect.bottom + 10,
+        });
+      }
+
+      // 如果是单词或短语，显示翻译弹窗；如果是长文本，显示批注菜单
+      if (text.length < 100) {
+        setShowTranslationPopup(true);
+        setShowAnnotationMenu(false);
+      } else {
+        const cfi = viewerRef.current?.getSelectionCFI();
+        if (cfi) {
+          setSelectionRange(cfi);
+          setShowAnnotationMenu(true);
+        }
       }
     }
   };
@@ -636,6 +663,41 @@ export function Reader() {
     setPageAnimation(animation);
     viewerRef.current?.setPageAnimation(animation);
   };
+
+  // 获取当前章节文本用于TTS
+  const getCurrentChapterText = () => {
+    try {
+      // 尝试从 EPUB viewer 的 iframe 中获取文本
+      const container = document.getElementById('epub-viewer-container');
+      if (container) {
+        const iframe = container.querySelector('iframe') as HTMLIFrameElement;
+        if (iframe?.contentDocument?.body) {
+          // 移除脚本和样式标签的内容
+          const clone = iframe.contentDocument.body.cloneNode(true) as HTMLElement;
+          const scripts = clone.querySelectorAll('script, style');
+          scripts.forEach(s => s.remove());
+
+          const text = clone.innerText || '';
+          // 清理文本：移除多余空白
+          const cleanedText = text.replace(/\s+/g, ' ').trim();
+          // 限制文本长度，避免过长
+          return cleanedText.substring(0, 10000);
+        }
+      }
+      return currentChapter?.title || '';
+    } catch (error) {
+      console.error('Failed to extract text for TTS:', error);
+      return currentChapter?.title || '';
+    }
+  };
+
+  // 打开TTS播放器时自动加载文本
+  useEffect(() => {
+    if (showTTSPlayer && !ttsText) {
+      const text = getCurrentChapterText();
+      setTTSText(text);
+    }
+  }, [showTTSPlayer]);
 
   // 键盘导航
   useEffect(() => {
@@ -789,6 +851,17 @@ export function Reader() {
             title="全屏 (F11)"
           >
             <Maximize className="h-5 w-5" />
+          </button>
+
+          {/* TTS语音朗读按钮 */}
+          <button
+            onClick={() => setShowTTSPlayer(!showTTSPlayer)}
+            className={`rounded p-2 hover:bg-gray-100 dark:hover:bg-gray-700 ${
+              showTTSPlayer ? 'bg-gray-100 dark:bg-gray-700' : ''
+            }`}
+            title="语音朗读"
+          >
+            <Speaker className="h-5 w-5" />
           </button>
         </div>
       </div>
@@ -948,7 +1021,7 @@ export function Reader() {
         )}
 
         {/* 阅读器区域 */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden" id="epub-viewer-container">
           {book && (
             <EpubViewer
               ref={viewerRef}
@@ -1077,6 +1150,26 @@ export function Reader() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* TTS播放器面板 */}
+        {showTTSPlayer && (
+          <div className="w-96 border-l border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 overflow-y-auto">
+            <TTSPlayer
+              bookId={bookId}
+              text={ttsText}
+              onTextChange={(text) => {
+                setTTSText(text);
+                // 如果没有文本，尝试从当前章节获取
+                if (!text && viewerRef.current) {
+                  // 获取当前章节内容的逻辑
+                  const content = document.querySelector('#viewer iframe')?.contentDocument?.body?.innerText || '';
+                  setTTSText(content.substring(0, 5000)); // 限制5000字符
+                }
+              }}
+              onClose={() => setShowTTSPlayer(false)}
+            />
           </div>
         )}
 
@@ -1364,6 +1457,22 @@ export function Reader() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 翻译弹窗 */}
+      {showTranslationPopup && selectedText && (
+        <TranslationPopup
+          selectedText={selectedText}
+          position={translationPosition}
+          bookId={bookId}
+          onClose={() => {
+            setShowTranslationPopup(false);
+            const selection = window.getSelection();
+            if (selection) {
+              selection.removeAllRanges();
+            }
+          }}
+        />
       )}
     </div>
   );

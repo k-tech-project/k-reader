@@ -29,7 +29,7 @@ function createWindow(): void {
 
   // 打开开发者工具 (开发环境)
   if (isDev) {
-    mainWindow.webContents.openDevTools();
+    mainWindow.webContents.openDevTools({mode:'detach'});
   }
 
   // 窗口关闭事件
@@ -63,7 +63,7 @@ app.whenReady().then(async () => {
   }
 
   // 设置 macOS Dock 图标（开发环境）
-  if (process.platform === 'darwin' && isDev) {
+  if (process.platform === 'darwin' && isDev && app.dock) {
     // 开发环境使用 PNG 格式（Electron 对 PNG 支持更好）
     const iconPath = join(process.cwd(), 'resources', 'icon.png');
     console.log('[Main] Looking for icon at:', iconPath);

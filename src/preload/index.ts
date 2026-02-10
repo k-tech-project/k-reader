@@ -15,6 +15,7 @@ import type {
   Collection,
   ExportResult,
   VersionInfo,
+  WordBookEntry,
 } from '@shared/types';
 
 // 定义ElectronAPI接口
@@ -82,6 +83,17 @@ interface ElectronAPI {
     removeBook: (data: { collectionId: string; bookId: string }) => Promise<void>;
     getBooks: (collectionId: string) => Promise<string[]>;
     getByBook: (bookId: string) => Promise<Collection[]>;
+  };
+
+  wordbook: {
+    add: (data: { word: string; translation?: string; definition?: string; language?: string; bookId?: string; context?: string }) => Promise<WordBookEntry>;
+    getAll: (options?: { language?: string; bookId?: string }) => Promise<WordBookEntry[]>;
+    get: (id: string) => Promise<WordBookEntry | null>;
+    update: (id: string, updates: { translation?: string; definition?: string; context?: string }) => Promise<void>;
+    delete: (id: string) => Promise<void>;
+    search: (query: string, options?: { language?: string }) => Promise<WordBookEntry[]>;
+    getByBook: (bookId: string) => Promise<WordBookEntry[]>;
+    getStats: () => Promise<{ totalCount: number; byLanguage: Record<string, number> }>;
   };
 
   settings: {
@@ -177,6 +189,17 @@ const electronAPI: ElectronAPI = {
     removeBook: (data) => ipcRenderer.invoke(IPCChannels.COLLECTION_REMOVE_BOOK, data),
     getBooks: (collectionId) => ipcRenderer.invoke(IPCChannels.COLLECTION_GET_BOOKS, collectionId),
     getByBook: (bookId) => ipcRenderer.invoke(IPCChannels.COLLECTION_GET_BY_BOOK, bookId),
+  },
+
+  wordbook: {
+    add: (data) => ipcRenderer.invoke(IPCChannels.WORDBOOK_ADD, data),
+    getAll: (options) => ipcRenderer.invoke(IPCChannels.WORDBOOK_GET_ALL, options),
+    get: (id) => ipcRenderer.invoke(IPCChannels.WORDBOOK_GET, id),
+    update: (id, updates) => ipcRenderer.invoke(IPCChannels.WORDBOOK_UPDATE, id, updates),
+    delete: (id) => ipcRenderer.invoke(IPCChannels.WORDBOOK_DELETE, id),
+    search: (query, options) => ipcRenderer.invoke(IPCChannels.WORDBOOK_SEARCH, query, options),
+    getByBook: (bookId) => ipcRenderer.invoke(IPCChannels.WORDBOOK_GET_BY_BOOK, bookId),
+    getStats: () => ipcRenderer.invoke(IPCChannels.WORDBOOK_GET_STATS),
   },
 
   settings: {

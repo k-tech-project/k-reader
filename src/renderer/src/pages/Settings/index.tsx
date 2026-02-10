@@ -3,7 +3,7 @@
  */
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, BookOpen, Type, Palette, Keyboard, Save } from '../../utils/icons';
+import { ArrowLeft, BookOpen, Type, Palette, Keyboard, Save, Bookmark } from '../../utils/icons';
 import { PRESET_THEMES, PAGE_ANIMATIONS, type ReaderTheme, type PageAnimationType } from '../../modules/reader/types/reader.types';
 
 // 设置接口
@@ -348,6 +348,26 @@ export function Settings() {
                 <span className="font-mono text-gray-900 dark:text-white">Esc</span>
               </div>
             </div>
+          </section>
+
+          {/* 生词本入口 */}
+          <section className="rounded-lg bg-white p-6 shadow-sm dark:bg-gray-800">
+            <h2 className="mb-4 flex items-center text-lg font-semibold text-gray-900 dark:text-white">
+              <Bookmark className="mr-2 h-5 w-5" />
+              生词本
+            </h2>
+
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              在阅读时选择文本可自动添加到生词本，支持翻译和语音朗读
+            </p>
+
+            <button
+              onClick={() => navigate('/wordbook')}
+              className="inline-flex items-center space-x-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700 transition-colors"
+            >
+              <Bookmark className="h-4 w-4" />
+              <span>打开生词本</span>
+            </button>
           </section>
         </div>
       </div>

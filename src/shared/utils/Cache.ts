@@ -62,8 +62,10 @@ export class LRUCache<K, V> {
     // 如果超过最大容量,删除最旧的项
     if (this.cache.size >= this.maxSize) {
       const firstKey = this.cache.keys().next().value;
-      this.cache.delete(firstKey);
-      logger.debug(`Cache evicted: ${String(firstKey)}`, 'LRUCache');
+      if (firstKey !== undefined) {
+        this.cache.delete(firstKey);
+        logger.debug(`Cache evicted: ${String(firstKey)}`, 'LRUCache');
+      }
     }
 
     // 添加新项
