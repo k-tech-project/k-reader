@@ -10,6 +10,7 @@ import type {
   ReaderTheme,
   ReaderEventType,
   EpubReaderInitOptions,
+  TOCItem,
 } from '../types/reader.types';
 
 // 导出 ReaderLocation 供其他模块使用
@@ -40,6 +41,8 @@ export class EpubReader {
   private settings: ReaderSettings;
   private eventListeners: Map<ReaderEventType, Set<Function>> = new Map();
   private isDestroyed = false;
+  private currentChapterHref: string | null = null; // 跟踪当前章节
+  private toc: TOCItem[] = []; // 存储目录信息
 
   constructor() {
     this.settings = {
@@ -142,6 +145,19 @@ export class EpubReader {
       // 保存初始位置
       this.currentLocation = this.rendition.location as ReaderLocation;
       console.info('[EpubReader] emitting ready event, location:', this.currentLocation);
+
+      // 获取目录信息
+      try {
+        this.toc = await this.getTOC();
+        console.info('[EpubReader] TOC loaded, items:', this.toc.length);
+
+        // 检测初始章节
+        if (this.currentLocation?.start?.cfi) {
+          this.checkChapterChanged(this.currentLocation.start.cfi);
+        }
+      } catch (error) {
+        console.warn('[EpubReader] Failed to load TOC during init:', error);
+      }
 
       this.emit('ready', { location: this.currentLocation });
     } catch (error) {
@@ -278,6 +294,19 @@ export class EpubReader {
       return 0;
     }
     return this.currentLocation.start.percentage;
+  }
+
+  /**
+   * 设置目录信息（供外部调用）
+   */
+  setTOC(toc: TOCItem[]): void {
+    this.toc = toc;
+    console.log('[EpubReader] TOC set externally, items:', toc.length);
+
+    // 如果已经有位置信息，立即检测章节
+    if (this.currentLocation?.start?.cfi) {
+      this.checkChapterChanged(this.currentLocation.start.cfi);
+    }
   }
 
   /**
@@ -642,6 +671,9 @@ export class EpubReader {
       console.log('[EpubReader] relocated - atStart:', location.atStart, 'atEnd:', location.atEnd);
       this.currentLocation = location;
       this.emit('locationChanged', location);
+
+      // 检测章节变化
+      this.checkChapterChanged(location.start.cfi);
     });
 
     // 渲染完成事件
@@ -709,6 +741,65 @@ export class EpubReader {
         }
       `,
     };
+  }
+
+  /**
+   * 检查章节是否发生变化
+   */
+  private checkChapterChanged(cfi: string): void {
+    if (!this.book || this.toc.length === 0) return;
+
+    try {
+      // 获取当前显示的章节 href
+      const currentDisplayHref = this.rendition?.location?.start?.href;
+      console.log('[EpubReader] checkChapterChanged - CFI:', cfi.substring(0, 50));
+      console.log('[EpubReader] checkChapterChanged - display href:', currentDisplayHref);
+
+      if (!currentDisplayHref) return;
+
+      // 检查是否是同一章节
+      if (this.currentChapterHref === currentDisplayHref) {
+        console.log('[EpubReader] Same chapter, skipping');
+        return;
+      }
+
+      // 在 TOC 中查找匹配的章节
+      const findChapterInTOC = (items: TOCItem[], href: string): any => {
+        for (const item of items) {
+          if (item.href) {
+            // 精确匹配
+            if (item.href === href) {
+              return item;
+            }
+            // 基础名称匹配（去掉路径和扩展名）
+            const itemBase = item.href.split('/').pop()?.toLowerCase();
+            const hrefBase = href.split('/').pop()?.toLowerCase();
+            if (itemBase && hrefBase && itemBase === hrefBase) {
+              return item;
+            }
+          }
+          if (item.children) {
+            const found = findChapterInTOC(item.children, href);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+
+      const chapter = findChapterInTOC(this.toc, currentDisplayHref);
+
+      this.currentChapterHref = currentDisplayHref;
+
+      if (chapter) {
+        console.log('[EpubReader] Found chapter in TOC:', chapter.label, 'href:', chapter.href);
+        this.emit('chapterChanged', { href: chapter.href, title: chapter.label });
+      } else {
+        console.log('[EpubReader] Chapter not found in TOC, using display href:', currentDisplayHref);
+        this.emit('chapterChanged', { href: currentDisplayHref, title: '未知章节' });
+      }
+    } catch (error) {
+      console.error('[EpubReader] Failed to check chapter change:', error);
+    }
   }
 
   /**

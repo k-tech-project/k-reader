@@ -9,6 +9,11 @@ const JSZip = require("jszip");
 const xml2js = require("xml2js");
 const promises = require("fs/promises");
 const crypto = require("crypto");
+const openai = require("@langchain/openai");
+const tiktoken = require("tiktoken");
+const anthropic = require("@langchain/anthropic");
+const textsplitters = require("@langchain/textsplitters");
+const CryptoJS = require("crypto-js");
 let store$1 = null;
 function getStore$1() {
   if (!store$1) {
@@ -179,6 +184,13 @@ const IPCChannels = {
   DB_QUERY: "db:query",
   DB_EXECUTE: "db:execute",
   DB_TRANSACTION: "db:transaction",
+  // AI 操作
+  AI_SUMMARIZE_CHAPTER: "ai:summarizeChapter",
+  AI_SUMMARIZE_CHAPTERS: "ai:summarizeChapters",
+  AI_GET_SUMMARY: "ai:getSummary",
+  AI_GET_ALL_SUMMARIES: "ai:getAllSummaries",
+  AI_DELETE_SUMMARY: "ai:deleteSummary",
+  AI_CHECK_CONFIG: "ai:checkConfig",
   // 系统操作
   SYSTEM_OPEN_EXTERNAL: "system:openExternal",
   SYSTEM_SHOW_ITEM_IN_FOLDER: "system:showItemInFolder",
@@ -819,6 +831,34 @@ class DatabaseService {
       );
 
       CREATE INDEX IF NOT EXISTS idx_translation_history_created ON translation_history(created_at DESC);
+    `);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS chapter_summaries (
+        id TEXT PRIMARY KEY,
+        book_id TEXT NOT NULL,
+        chapter_index INTEGER NOT NULL,
+        chapter_title TEXT,
+        summary TEXT NOT NULL,
+        model TEXT NOT NULL,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        UNIQUE(book_id, chapter_index),
+        FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_chapter_summaries_book ON chapter_summaries(book_id);
+      CREATE INDEX IF NOT EXISTS idx_chapter_summaries_book_chapter ON chapter_summaries(book_id, chapter_index);
+    `);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS ai_cache (
+        id TEXT PRIMARY KEY,
+        cache_key TEXT UNIQUE NOT NULL,
+        response TEXT NOT NULL,
+        model TEXT NOT NULL,
+        created_at INTEGER DEFAULT (strftime('%s', 'now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ai_cache_key ON ai_cache(cache_key);
+      CREATE INDEX IF NOT EXISTS idx_ai_cache_created ON ai_cache(created_at DESC);
     `);
   }
   /**
@@ -2244,12 +2284,19 @@ class SettingsHandlers {
    */
   static set(key, value) {
     const s = getStore();
+    const isAISettingUpdate = typeof key === "string" ? key === "ai" : typeof key === "object" && "ai" in key;
     if (typeof key === "object") {
       Object.entries(key).forEach(([k, v]) => {
         s.set(k, v);
       });
     } else {
       s.set(key, value);
+    }
+    if (isAISettingUpdate) {
+      Promise.resolve().then(() => ai).then(({ resetSummaryService: resetSummaryService2 }) => {
+        console.log("[SettingsHandlers] AI settings updated, resetting SummaryService");
+        resetSummaryService2();
+      });
     }
   }
   /**
@@ -2474,6 +2521,759 @@ class WordBookHandlers {
     return { totalCount, byLanguage };
   }
 }
+class OpenAIProvider {
+  provider = "openai";
+  model;
+  modelName;
+  constructor(config) {
+    this.modelName = config.model || "gpt-4o-mini";
+    const modelConfig = {
+      modelName: this.modelName,
+      temperature: config.temperature ?? 0.7,
+      maxTokens: config.maxTokens ?? 2e3
+    };
+    if (config.apiKey) {
+      modelConfig.apiKey = config.apiKey;
+    }
+    if (config.baseURL) {
+      modelConfig.configuration = {
+        baseURL: config.baseURL
+      };
+    }
+    this.model = new openai.ChatOpenAI(modelConfig);
+  }
+  async generateText(prompt, _options) {
+    const response = await this.model.invoke(prompt);
+    return response.content;
+  }
+  async *generateStream(prompt, _options) {
+    const stream = await this.model.stream(prompt);
+    for await (const chunk of stream) {
+      if (chunk.content) {
+        yield chunk.content;
+      }
+    }
+  }
+  countTokens(text) {
+    try {
+      const encoder = tiktoken.encoding_for_model(this.modelName);
+      const tokens = encoder.encode(text);
+      encoder.free();
+      return tokens.length;
+    } catch {
+      const encoder = tiktoken.encoding_for_model("gpt-4");
+      const tokens = encoder.encode(text);
+      encoder.free();
+      return tokens.length;
+    }
+  }
+}
+class AnthropicProvider {
+  provider = "anthropic";
+  model;
+  modelName;
+  constructor(config) {
+    this.modelName = config.model || "claude-3-5-sonnet-20241022";
+    this.model = new anthropic.ChatAnthropic({
+      modelName: this.modelName,
+      temperature: config.temperature ?? 0.7,
+      maxTokens: config.maxTokens ?? 2e3,
+      anthropicApiKey: config.apiKey,
+      clientOptions: config.baseURL ? {
+        baseURL: config.baseURL
+      } : void 0
+    });
+  }
+  async generateText(prompt, _options) {
+    const response = await this.model.invoke(prompt);
+    return response.content;
+  }
+  async *generateStream(prompt, _options) {
+    const stream = await this.model.stream(prompt);
+    for await (const chunk of stream) {
+      if (chunk.content) {
+        yield chunk.content;
+      }
+    }
+  }
+  countTokens(text) {
+    const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+    const otherChars = text.length - chineseChars;
+    return Math.ceil(chineseChars * 1.3 + otherChars * 0.25);
+  }
+}
+class ZhipuProvider {
+  provider = "zhipu";
+  model;
+  modelName;
+  constructor(config) {
+    this.modelName = config.model || "glm-4-flash";
+    const baseURL = config.baseURL || "https://open.bigmodel.cn/api/paas/v4/";
+    console.log("[ZhipuProvider] Initializing with:", {
+      model: this.modelName,
+      baseURL,
+      temperature: config.temperature,
+      maxTokens: config.maxTokens,
+      apiKeyLength: config.apiKey?.length
+    });
+    this.model = new openai.ChatOpenAI({
+      modelName: this.modelName,
+      temperature: config.temperature ?? 0.7,
+      maxTokens: config.maxTokens ?? 2e3,
+      apiKey: config.apiKey,
+      // 使用 apiKey 而不是 openAIApiKey
+      configuration: {
+        baseURL
+      }
+    });
+    console.log("[ZhipuProvider] Initialized successfully");
+  }
+  async generateText(prompt, _options) {
+    const response = await this.model.invoke(prompt);
+    return response.content;
+  }
+  async *generateStream(prompt, _options) {
+    const stream = await this.model.stream(prompt);
+    for await (const chunk of stream) {
+      if (chunk.content) {
+        yield chunk.content;
+      }
+    }
+  }
+  countTokens(text) {
+    const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+    const otherChars = text.length - chineseChars;
+    return Math.ceil(chineseChars * 1.5 + otherChars * 0.3);
+  }
+}
+class QianwenProvider {
+  provider = "qianwen";
+  model;
+  modelName;
+  constructor(config) {
+    this.modelName = config.model || "qwen-plus";
+    this.model = new openai.ChatOpenAI({
+      modelName: this.modelName,
+      temperature: config.temperature ?? 0.7,
+      maxTokens: config.maxTokens ?? 2e3,
+      apiKey: config.apiKey,
+      // 使用 apiKey
+      configuration: {
+        baseURL: config.baseURL || "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      }
+    });
+  }
+  async generateText(prompt, _options) {
+    const response = await this.model.invoke(prompt);
+    return response.content;
+  }
+  async *generateStream(prompt, _options) {
+    const stream = await this.model.stream(prompt);
+    for await (const chunk of stream) {
+      if (chunk.content) {
+        yield chunk.content;
+      }
+    }
+  }
+  countTokens(text) {
+    const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+    const otherChars = text.length - chineseChars;
+    return Math.ceil(chineseChars * 1.4 + otherChars * 0.3);
+  }
+}
+class CustomProvider {
+  provider = "custom";
+  model;
+  modelName;
+  constructor(config) {
+    if (!config.baseURL) {
+      throw new Error("自定义模型需要配置 Base URL");
+    }
+    this.modelName = config.model || "gpt-3.5-turbo";
+    console.log("[CustomProvider] Initializing with:", {
+      model: this.modelName,
+      baseURL: config.baseURL,
+      temperature: config.temperature,
+      maxTokens: config.maxTokens,
+      apiKeyLength: config.apiKey?.length
+    });
+    this.model = new openai.ChatOpenAI({
+      modelName: this.modelName,
+      temperature: config.temperature ?? 0.7,
+      maxTokens: config.maxTokens ?? 2e3,
+      apiKey: config.apiKey,
+      configuration: {
+        baseURL: config.baseURL
+      }
+    });
+    console.log("[CustomProvider] Initialized successfully");
+  }
+  async generateText(prompt, _options) {
+    const response = await this.model.invoke(prompt);
+    return response.content;
+  }
+  async *generateStream(prompt, _options) {
+    const stream = await this.model.stream(prompt);
+    for await (const chunk of stream) {
+      if (chunk.content) {
+        yield chunk.content;
+      }
+    }
+  }
+  countTokens(text) {
+    const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+    const otherChars = text.length - chineseChars;
+    return Math.ceil(chineseChars * 1.3 + otherChars * 0.3);
+  }
+}
+function createProvider(config) {
+  console.log("[createProvider] Creating provider with config:", {
+    provider: config.provider,
+    model: config.model,
+    baseURL: config.baseURL,
+    hasApiKey: !!config.apiKey,
+    apiKeyLength: config.apiKey?.length,
+    enabled: config.enabled
+  });
+  if (!config.enabled) {
+    throw new Error("AI 功能未启用");
+  }
+  if (!config.apiKey) {
+    throw new Error("请配置 API Key");
+  }
+  let provider;
+  switch (config.provider) {
+    case "openai":
+      console.log("[createProvider] Creating OpenAIProvider");
+      provider = new OpenAIProvider(config);
+      break;
+    case "claude":
+      console.log("[createProvider] Creating AnthropicProvider");
+      provider = new AnthropicProvider(config);
+      break;
+    case "zhipu":
+      console.log("[createProvider] Creating ZhipuProvider");
+      provider = new ZhipuProvider(config);
+      break;
+    case "qianwen":
+      console.log("[createProvider] Creating QianwenProvider");
+      provider = new QianwenProvider(config);
+      break;
+    case "custom":
+      console.log("[createProvider] Creating CustomProvider");
+      provider = new CustomProvider(config);
+      break;
+    default:
+      console.error("[createProvider] Unknown provider:", config.provider);
+      throw new Error(`不支持的 AI 提供商: ${config.provider}`);
+  }
+  console.log("[createProvider] Provider created successfully:", provider.provider);
+  return provider;
+}
+function createTextSplitter(options = {}) {
+  const {
+    chunkSize = 2e3,
+    chunkOverlap = 200,
+    separators = ["\n\n", "\n", "。", "！", "？", "；", "，", ",", " ", ""]
+  } = options;
+  return new textsplitters.RecursiveCharacterTextSplitter({
+    chunkSize,
+    chunkOverlap,
+    separators,
+    lengthFunction: (text) => text.length
+  });
+}
+async function splitText(text, options) {
+  const splitter = createTextSplitter(options);
+  return await splitter.splitText(text);
+}
+function cleanHtml(html) {
+  return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "").replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10))).replace(/[ \t]+/g, " ").replace(/\n\s*\n\s*\n/g, "\n\n").trim();
+}
+function generateCacheKey(content, model, prefix = "ai") {
+  const hash = CryptoJS.SHA256(content + model).toString();
+  return `${prefix}:${model}:${hash.substring(0, 16)}`;
+}
+class CacheManager {
+  constructor(db) {
+    this.db = db;
+  }
+  /**
+   * 获取缓存
+   */
+  get(cacheKey) {
+    const stmt = this.db.prepare(`
+      SELECT id, cache_key, response, model, created_at
+      FROM ai_cache
+      WHERE cache_key = ?
+    `);
+    const row = stmt.get(cacheKey);
+    if (!row) return null;
+    return {
+      id: row.id,
+      cacheKey: row.cache_key,
+      response: row.response,
+      model: row.model,
+      createdAt: new Date(row.created_at * 1e3)
+    };
+  }
+  /**
+   * 设置缓存
+   */
+  set(cacheKey, response, model) {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO ai_cache (id, cache_key, response, model)
+      VALUES (?, ?, ?, ?)
+    `);
+    stmt.run(uuid.v4(), cacheKey, response, model);
+  }
+  /**
+   * 删除缓存
+   */
+  delete(cacheKey) {
+    const stmt = this.db.prepare(`
+      DELETE FROM ai_cache WHERE cache_key = ?
+    `);
+    stmt.run(cacheKey);
+  }
+  /**
+   * 清理过期缓存
+   * @param days 保留最近多少天的缓存
+   */
+  cleanup(days = 30) {
+    const stmt = this.db.prepare(`
+      DELETE FROM ai_cache
+      WHERE created_at < strftime('%s', 'now', '-${days} days')
+    `);
+    const result = stmt.run();
+    return result.changes;
+  }
+  /**
+   * 获取缓存统计
+   */
+  getStats() {
+    const stmt = this.db.prepare(`
+      SELECT 
+        COUNT(*) as total,
+        SUM(LENGTH(response)) as size
+      FROM ai_cache
+    `);
+    const row = stmt.get();
+    return {
+      total: row.total || 0,
+      size: row.size || 0
+    };
+  }
+}
+async function summarizeChunks(llm, chunks) {
+  const mapPromises = chunks.map(async (chunk) => {
+    const prompt = `请总结以下章节片段的核心要点：
+
+${chunk}
+
+要求：
+- 简洁扼要，100-150字
+- 提取主要内容和关键信息
+- 保持客观准确
+
+总结：`;
+    const response = await llm.invoke(prompt);
+    return response.content;
+  });
+  const summaries = await Promise.all(mapPromises);
+  const reducePrompt = `以下是同一章节不同部分的总结：
+
+${summaries.join("\n\n---\n\n")}
+
+请将这些总结合并成一个连贯完整的章节摘要，要求：
+1. 字数控制在 200-500 字
+2. 包含章节的主要内容和核心观点
+3. 突出重要人物、事件或概念
+4. 保持逻辑连贯，语言流畅
+5. 客观准确，不添加原文没有的内容
+
+章节摘要：`;
+  const finalResponse = await llm.invoke(reducePrompt);
+  return finalResponse.content;
+}
+async function summarizeShort(llm, text) {
+  const prompt = `
+请总结以下章节内容，要求：
+1. 字数控制在 200-500 字
+2. 包含主要内容和核心观点
+3. 突出重要人物、事件或概念
+4. 保持逻辑连贯，语言流畅
+
+章节内容：
+${text}
+
+章节摘要：
+`;
+  const response = await llm.invoke(prompt);
+  return response.content;
+}
+class SummaryService {
+  constructor(db, aiConfig) {
+    this.db = db;
+    this.aiConfig = aiConfig;
+    this.cacheManager = new CacheManager(db);
+  }
+  cacheManager;
+  /**
+   * 总结章节内容
+   */
+  async summarizeChapter(bookId, chapterIndex, options = {}) {
+    logger.info(`开始总结章节: bookId=${bookId}, chapterIndex=${chapterIndex}`, "SummaryService");
+    if (!options.forceRefresh) {
+      const existing = this.getSummaryFromDB(bookId, chapterIndex);
+      if (existing) {
+        logger.info("从数据库返回已有总结", "SummaryService");
+        return existing;
+      }
+    }
+    const { content, title } = await this.getChapterContent(bookId, chapterIndex);
+    if (!content || content.trim().length === 0) {
+      throw new Error("章节内容为空");
+    }
+    logger.info(`章节内容长度: ${content.length} 字符`, "SummaryService");
+    const cacheKey = generateCacheKey(content, this.aiConfig.model, "summary");
+    if (!options.forceRefresh) {
+      const cached = this.cacheManager.get(cacheKey);
+      if (cached) {
+        logger.info("从 AI 缓存返回总结", "SummaryService");
+        const summary2 = this.saveSummaryToDB(bookId, chapterIndex, title, cached.response, cached.model);
+        return summary2;
+      }
+    }
+    const provider = createProvider(this.aiConfig);
+    let summaryText;
+    const shouldSplit = content.length > (options.chunkSize || 3e3);
+    if (shouldSplit) {
+      logger.info("章节较长，使用 Map-Reduce 模式总结", "SummaryService");
+      const chunks = await splitText(content, {
+        chunkSize: options.chunkSize,
+        chunkOverlap: options.chunkOverlap
+      });
+      logger.info(`分成 ${chunks.length} 个文本块`, "SummaryService");
+      summaryText = await summarizeChunks(provider.model, chunks);
+    } else {
+      logger.info("章节较短，直接总结", "SummaryService");
+      summaryText = await summarizeShort(provider.model, content);
+    }
+    this.cacheManager.set(cacheKey, summaryText, this.aiConfig.model);
+    const summary = this.saveSummaryToDB(bookId, chapterIndex, title, summaryText, this.aiConfig.model);
+    logger.info("章节总结完成", "SummaryService");
+    return summary;
+  }
+  /**
+   * 批量总结多个章节
+   */
+  async summarizeChapters(bookId, chapterIndices, options = {}) {
+    const results = [];
+    for (const index of chapterIndices) {
+      try {
+        const summary = await this.summarizeChapter(bookId, index, options);
+        results.push(summary);
+      } catch (error) {
+        logger.error(`总结章节 ${index} 失败: ${error}`, "SummaryService");
+      }
+    }
+    return results;
+  }
+  /**
+   * 获取已有的总结
+   */
+  getSummary(bookId, chapterIndex) {
+    return this.getSummaryFromDB(bookId, chapterIndex);
+  }
+  /**
+   * 获取书籍的所有总结
+   */
+  getAllSummaries(bookId) {
+    const stmt = this.db.prepare(`
+      SELECT id, book_id, chapter_index, chapter_title, summary, model, created_at
+      FROM chapter_summaries
+      WHERE book_id = ?
+      ORDER BY chapter_index
+    `);
+    const rows = stmt.all(bookId);
+    return rows.map((row) => ({
+      id: row.id,
+      bookId: row.book_id,
+      chapterIndex: row.chapter_index,
+      chapterTitle: row.chapter_title,
+      summary: row.summary,
+      model: row.model,
+      createdAt: new Date(row.created_at * 1e3)
+    }));
+  }
+  /**
+   * 删除总结
+   */
+  deleteSummary(bookId, chapterIndex) {
+    const stmt = this.db.prepare(`
+      DELETE FROM chapter_summaries
+      WHERE book_id = ? AND chapter_index = ?
+    `);
+    stmt.run(bookId, chapterIndex);
+  }
+  /**
+   * 从数据库获取总结
+   */
+  getSummaryFromDB(bookId, chapterIndex) {
+    const stmt = this.db.prepare(`
+      SELECT id, book_id, chapter_index, chapter_title, summary, model, created_at
+      FROM chapter_summaries
+      WHERE book_id = ? AND chapter_index = ?
+    `);
+    const row = stmt.get(bookId, chapterIndex);
+    if (!row) return null;
+    return {
+      id: row.id,
+      bookId: row.book_id,
+      chapterIndex: row.chapter_index,
+      chapterTitle: row.chapter_title,
+      summary: row.summary,
+      model: row.model,
+      createdAt: new Date(row.created_at * 1e3)
+    };
+  }
+  /**
+   * 保存总结到数据库
+   */
+  saveSummaryToDB(bookId, chapterIndex, chapterTitle, summary, model) {
+    const id = uuid.v4();
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO chapter_summaries 
+        (id, book_id, chapter_index, chapter_title, summary, model)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(id, bookId, chapterIndex, chapterTitle, summary, model);
+    return {
+      id,
+      bookId,
+      chapterIndex,
+      chapterTitle,
+      summary,
+      model,
+      createdAt: /* @__PURE__ */ new Date()
+    };
+  }
+  /**
+   * 获取章节内容（从 EPUB 文件）
+   */
+  async getChapterContent(bookId, chapterIndex) {
+    const bookStmt = this.db.prepare(`
+      SELECT file_path, metadata FROM books WHERE id = ?
+    `);
+    const book = bookStmt.get(bookId);
+    if (!book) {
+      throw new Error(`书籍不存在: ${bookId}`);
+    }
+    const metadata = JSON.parse(book.metadata || "{}");
+    const spine = metadata.spine;
+    const toc = metadata.toc;
+    if (!spine || !spine[chapterIndex]) {
+      throw new Error(`章节索引越界: ${chapterIndex}`);
+    }
+    const chapterItem = spine[chapterIndex];
+    const buffer = await promises.readFile(book.file_path);
+    const zip = await JSZip.loadAsync(buffer);
+    const containerFile = zip.file("META-INF/container.xml");
+    if (!containerFile) {
+      throw new Error("Invalid EPUB: container.xml not found");
+    }
+    let chapterFile = zip.file(`OEBPS/${chapterItem.href}`) || zip.file(chapterItem.href);
+    if (!chapterFile) {
+      const files = Object.keys(zip.files);
+      const found = files.find((f) => f.endsWith(chapterItem.href));
+      if (found) {
+        chapterFile = zip.file(found);
+      }
+    }
+    if (!chapterFile) {
+      throw new Error(`章节文件未找到: ${chapterItem.href}`);
+    }
+    const html = await chapterFile.async("string");
+    const content = cleanHtml(html);
+    let title;
+    if (toc && toc.length > 0) {
+      const findInToc = (items) => {
+        for (const item of items) {
+          if (item.href === chapterItem.href || item.href.includes(chapterItem.id)) {
+            return item.label;
+          }
+          if (item.children) {
+            const found = findInToc(item.children);
+            if (found) return found;
+          }
+        }
+        return void 0;
+      };
+      title = findInToc(toc);
+    }
+    return { content, title };
+  }
+}
+let summaryService = null;
+let lastConfigHash = "";
+function getSummaryService() {
+  const db = DatabaseService.getInstance().getDatabase();
+  const aiConfig = SettingsHandlers.get("ai");
+  if (!aiConfig || !aiConfig.enabled) {
+    throw new Error("AI 功能未启用，请在设置中配置");
+  }
+  if (!aiConfig.apiKey) {
+    throw new Error("请配置 AI API Key");
+  }
+  const currentConfigHash = JSON.stringify({
+    provider: aiConfig.provider,
+    apiKey: aiConfig.apiKey.substring(0, 10),
+    // 只比较前10个字符
+    model: aiConfig.model,
+    baseURL: aiConfig.baseURL
+  });
+  if (summaryService && currentConfigHash !== lastConfigHash) {
+    console.log("[AIHandlers] AI config changed, recreating SummaryService");
+    console.log("[AIHandlers] Old hash:", lastConfigHash, "New hash:", currentConfigHash);
+    console.log("[AIHandlers] New config provider:", aiConfig.provider, "model:", aiConfig.model);
+    summaryService = null;
+  }
+  if (!summaryService) {
+    console.log("[AIHandlers] Creating new SummaryService with config:", {
+      provider: aiConfig.provider,
+      model: aiConfig.model,
+      baseURL: aiConfig.baseURL
+    });
+    summaryService = new SummaryService(db, aiConfig);
+    lastConfigHash = currentConfigHash;
+  }
+  return summaryService;
+}
+function resetSummaryService() {
+  console.log("[AIHandlers] Resetting SummaryService cache");
+  summaryService = null;
+  lastConfigHash = "";
+}
+class AIHandlers {
+  /**
+   * 总结章节
+   */
+  static async summarizeChapter(bookId, chapterIndex, options) {
+    logger.info(`IPC: 总结章节 - bookId=${bookId}, chapterIndex=${chapterIndex}`, "AIHandlers");
+    try {
+      console.log("[AIHandlers] Getting SummaryService instance...");
+      const service = getSummaryService();
+      console.log("[AIHandlers] Service obtained, calling summarizeChapter...");
+      const result = await service.summarizeChapter(bookId, chapterIndex, options);
+      console.log("[AIHandlers] Summarize completed:", result);
+      return result;
+    } catch (error) {
+      logger.error(`总结章节失败: ${error}`, "AIHandlers");
+      console.error("[AIHandlers] Summarize error:", error);
+      throw error;
+    }
+  }
+  /**
+   * 批量总结章节
+   */
+  static async summarizeChapters(bookId, chapterIndices, options) {
+    logger.info(`IPC: 批量总结章节 - bookId=${bookId}, count=${chapterIndices.length}`, "AIHandlers");
+    try {
+      const service = getSummaryService();
+      return await service.summarizeChapters(bookId, chapterIndices, options);
+    } catch (error) {
+      logger.error(`批量总结章节失败: ${error}`, "AIHandlers");
+      throw error;
+    }
+  }
+  /**
+   * 获取章节总结
+   */
+  static getSummary(bookId, chapterIndex) {
+    logger.info(`IPC: 获取章节总结 - bookId=${bookId}, chapterIndex=${chapterIndex}`, "AIHandlers");
+    console.log("[AIHandlers] getSummary called with:", { bookId, chapterIndex });
+    try {
+      const service = getSummaryService();
+      const result = service.getSummary(bookId, chapterIndex);
+      console.log("[AIHandlers] getSummary result:", result);
+      return result;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes("未启用") || errorMessage.includes("未配置") || errorMessage.includes("API Key")) {
+        logger.info(`AI功能未配置，跳过获取总结`, "AIHandlers");
+        console.log("[AIHandlers] AI not configured, returning null");
+        return null;
+      }
+      logger.error(`获取章节总结失败: ${error}`, "AIHandlers");
+      console.error("[AIHandlers] getSummary error:", error);
+      return null;
+    }
+  }
+  /**
+   * 获取书籍的所有总结
+   */
+  static getAllSummaries(bookId) {
+    logger.info(`IPC: 获取所有章节总结 - bookId=${bookId}`, "AIHandlers");
+    try {
+      const service = getSummaryService();
+      return service.getAllSummaries(bookId);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes("未启用") || errorMessage.includes("未配置") || errorMessage.includes("API Key")) {
+        logger.info(`AI功能未配置，返回空总结列表`, "AIHandlers");
+        return [];
+      }
+      logger.error(`获取所有章节总结失败: ${error}`, "AIHandlers");
+      return [];
+    }
+  }
+  /**
+   * 删除章节总结
+   */
+  static deleteSummary(bookId, chapterIndex) {
+    logger.info(`IPC: 删除章节总结 - bookId=${bookId}, chapterIndex=${chapterIndex}`, "AIHandlers");
+    try {
+      const service = getSummaryService();
+      service.deleteSummary(bookId, chapterIndex);
+    } catch (error) {
+      logger.error(`删除章节总结失败: ${error}`, "AIHandlers");
+      throw error;
+    }
+  }
+  /**
+   * 检查 AI 配置是否有效
+   */
+  static checkConfig() {
+    console.log("[AIHandlers] checkConfig called");
+    try {
+      const aiConfig = SettingsHandlers.get("ai");
+      console.log("[AIHandlers] Retrieved aiConfig:", aiConfig);
+      if (!aiConfig || !aiConfig.enabled) {
+        console.log("[AIHandlers] AI not enabled");
+        return { valid: false, error: "AI 功能未启用" };
+      }
+      if (!aiConfig.apiKey) {
+        console.log("[AIHandlers] No API key configured");
+        return { valid: false, error: "未配置 API Key" };
+      }
+      if (!aiConfig.provider) {
+        console.log("[AIHandlers] No provider selected");
+        return { valid: false, error: "未选择 AI 提供商" };
+      }
+      console.log("[AIHandlers] AI config is valid");
+      return { valid: true };
+    } catch (error) {
+      console.error("[AIHandlers] checkConfig error:", error);
+      return { valid: false, error: String(error) };
+    }
+  }
+}
+const ai = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  AIHandlers,
+  resetSummaryService
+}, Symbol.toStringTag, { value: "Module" }));
 class IPCHandlers {
   /**
    * 注册所有IPC处理器
@@ -2490,6 +3290,7 @@ class IPCHandlers {
     this.registerSettingsHandlers();
     this.registerDatabaseHandlers();
     this.registerSystemHandlers();
+    this.registerAIHandlers();
   }
   /**
    * 注册窗口相关处理器
@@ -2740,6 +3541,29 @@ class IPCHandlers {
       return SystemHandlers.getVersion();
     });
   }
+  /**
+   * 注册 AI 相关处理器
+   */
+  static registerAIHandlers() {
+    electron.ipcMain.handle(IPCChannels.AI_SUMMARIZE_CHAPTER, (_event, bookId, chapterIndex, options) => {
+      return AIHandlers.summarizeChapter(bookId, chapterIndex, options);
+    });
+    electron.ipcMain.handle(IPCChannels.AI_SUMMARIZE_CHAPTERS, (_event, bookId, chapterIndices, options) => {
+      return AIHandlers.summarizeChapters(bookId, chapterIndices, options);
+    });
+    electron.ipcMain.handle(IPCChannels.AI_GET_SUMMARY, (_event, bookId, chapterIndex) => {
+      return AIHandlers.getSummary(bookId, chapterIndex);
+    });
+    electron.ipcMain.handle(IPCChannels.AI_GET_ALL_SUMMARIES, (_event, bookId) => {
+      return AIHandlers.getAllSummaries(bookId);
+    });
+    electron.ipcMain.handle(IPCChannels.AI_DELETE_SUMMARY, (_event, bookId, chapterIndex) => {
+      return AIHandlers.deleteSummary(bookId, chapterIndex);
+    });
+    electron.ipcMain.handle(IPCChannels.AI_CHECK_CONFIG, () => {
+      return AIHandlers.checkConfig();
+    });
+  }
 }
 let mainWindow = null;
 const isDev = process.env.NODE_ENV === "development" || !electron.app.isPackaged;
@@ -2751,7 +3575,7 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
   }
   if (isDev) {
-    mainWindow.webContents.openDevTools();
+    mainWindow.webContents.openDevTools({ mode: "detach" });
   }
   mainWindow.on("closed", () => {
     mainWindow = null;

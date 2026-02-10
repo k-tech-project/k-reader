@@ -34,6 +34,12 @@ export class SettingsHandlers {
    */
   static set(key: string | Record<string, any>, value?: any): void {
     const s = getStore();
+
+    // 检测是否是 AI 设置更新
+    const isAISettingUpdate = typeof key === 'string'
+      ? key === 'ai'
+      : typeof key === 'object' && 'ai' in key;
+
     if (typeof key === 'object') {
       // 批量设置
       Object.entries(key).forEach(([k, v]) => {
@@ -42,6 +48,15 @@ export class SettingsHandlers {
     } else {
       // 单个设置
       s.set(key as any, value);
+    }
+
+    // 如果是 AI 设置更新，重置 SummaryService 缓存
+    if (isAISettingUpdate) {
+      // 动态导入避免循环依赖
+      import('./ai').then(({ resetSummaryService }) => {
+        console.log('[SettingsHandlers] AI settings updated, resetting SummaryService');
+        resetSummaryService();
+      });
     }
   }
 

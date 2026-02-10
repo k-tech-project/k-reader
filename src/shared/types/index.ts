@@ -143,11 +143,23 @@ export interface SyncSettings {
 
 export interface AISettings {
   enabled: boolean;
-  provider: 'openai' | 'claude';
+  provider: 'openai' | 'claude' | 'zhipu' | 'qianwen' | 'custom';
   apiKey: string;
+  baseURL?: string; // 自定义 API 端点（用于国内模型或代理）
   model: string;
   temperature: number;
   maxTokens: number;
+}
+
+// 章节总结接口
+export interface ChapterSummary {
+  id: string;
+  bookId: string;
+  chapterIndex: number;
+  chapterTitle?: string;
+  summary: string;
+  model: string;
+  createdAt: Date;
 }
 
 export interface TTSSettings {

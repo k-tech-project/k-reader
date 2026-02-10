@@ -236,14 +236,11 @@ export const EpubViewer = forwardRef<EpubViewerRef, EpubViewerProps>(function Ep
           onProgressChange?.(location.start.percentage);
         });
 
-        reader.on('chapterChanged', (data: { href: string }) => {
+        reader.on('chapterChanged', (data: { href: string; title: string }) => {
           if (!mounted) return;
-          // 查找章节标题
-          const flatToc = flattenToc(toc);
-          const chapter = flatToc.find(item => item.href === data.href);
-          if (chapter) {
-            onChapterChange?.({ href: data.href, title: chapter.label });
-          }
+          console.log('[EpubViewer] chapterChanged event received:', data);
+          // 直接使用从 EpubReader 传递过来的标题
+          onChapterChange?.({ href: data.href, title: data.title });
         });
 
         // 初始化阅读器
@@ -262,6 +259,8 @@ export const EpubViewer = forwardRef<EpubViewerRef, EpubViewerProps>(function Ep
         try {
           const tableOfContents = await reader.getTOC();
           setToc(tableOfContents);
+          // 设置 EpubReader 的目录信息，用于章节检测
+          reader.setTOC(tableOfContents);
           console.info('[EpubViewer] TOC loaded, items:', tableOfContents.length);
           // 通知父组件目录已加载
           onTOCLoaded?.(tableOfContents);

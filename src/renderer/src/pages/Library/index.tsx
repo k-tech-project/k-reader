@@ -4,7 +4,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useElectronAPI } from '../../hooks/useElectronAPI';
-import { Plus, BookOpen, FolderOpen, Search, X, List as ListIcon, Squares2x2, Info, ArrowUpDown, ChevronDown, Filter, Tag as TagIcon, FolderCollection, Trash2, CheckSquare, Square } from '../../utils/icons';
+import { Plus, BookOpen, FolderOpen, Search, X, List as ListIcon, Squares2x2, Info, ArrowUpDown, ChevronDown, Filter, Tag as TagIcon, FolderCollection, Trash2, CheckSquare, Square, Settings } from '../../utils/icons';
 import { toast } from '../../components/Toast';
 import { modal } from '../../components/Modal';
 import { TagManager } from '../../components/TagManager';
@@ -628,6 +628,15 @@ export function Library() {
                 </div>
               )}
             </div>
+
+            {/* 设置按钮 */}
+            <button
+              onClick={() => navigate('/settings')}
+              className="rounded-lg border border-gray-300 p-2 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-700 transition-colors"
+              title="设置"
+            >
+              <Settings className="h-5 w-5" />
+            </button>
 
             <button
               onClick={() => importMutation.mutate()}

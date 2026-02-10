@@ -14,6 +14,7 @@ import { SettingsHandlers } from './handlers/settings';
 import { DatabaseHandlers } from './handlers/database';
 import { SystemHandlers } from './handlers/system';
 import { WordBookHandlers } from './handlers/wordbook';
+import { AIHandlers } from './handlers/ai';
 
 export class IPCHandlers {
   /**
@@ -31,6 +32,7 @@ export class IPCHandlers {
     this.registerSettingsHandlers();
     this.registerDatabaseHandlers();
     this.registerSystemHandlers();
+    this.registerAIHandlers();
   }
 
   /**
@@ -342,6 +344,35 @@ export class IPCHandlers {
 
     ipcMain.handle(IPCChannels.SYSTEM_GET_VERSION, () => {
       return SystemHandlers.getVersion();
+    });
+  }
+
+  /**
+   * 注册 AI 相关处理器
+   */
+  private static registerAIHandlers(): void {
+    ipcMain.handle(IPCChannels.AI_SUMMARIZE_CHAPTER, (_event, bookId, chapterIndex, options) => {
+      return AIHandlers.summarizeChapter(bookId, chapterIndex, options);
+    });
+
+    ipcMain.handle(IPCChannels.AI_SUMMARIZE_CHAPTERS, (_event, bookId, chapterIndices, options) => {
+      return AIHandlers.summarizeChapters(bookId, chapterIndices, options);
+    });
+
+    ipcMain.handle(IPCChannels.AI_GET_SUMMARY, (_event, bookId, chapterIndex) => {
+      return AIHandlers.getSummary(bookId, chapterIndex);
+    });
+
+    ipcMain.handle(IPCChannels.AI_GET_ALL_SUMMARIES, (_event, bookId) => {
+      return AIHandlers.getAllSummaries(bookId);
+    });
+
+    ipcMain.handle(IPCChannels.AI_DELETE_SUMMARY, (_event, bookId, chapterIndex) => {
+      return AIHandlers.deleteSummary(bookId, chapterIndex);
+    });
+
+    ipcMain.handle(IPCChannels.AI_CHECK_CONFIG, () => {
+      return AIHandlers.checkConfig();
     });
   }
 }

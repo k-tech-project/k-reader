@@ -16,6 +16,22 @@ export function setupGlobalErrorHandlers(): void {
     // 阻止默认的错误处理（避免在控制台显示）
     event.preventDefault();
 
+    // 检查是否是组件卸载导致的错误（这些通常可以忽略）
+    const reason = event.reason;
+    if (reason && typeof reason === 'object') {
+      const message = reason.message || String(reason);
+      // 忽略一些常见的、无害的错误
+      if (
+        message.includes('已销毁') ||
+        message.includes('destroyed') ||
+        message.includes('unmounted') ||
+        message.includes('canceled')
+      ) {
+        console.warn('[ErrorHandler] Ignoring harmless error from unmounted component:', message);
+        return;
+      }
+    }
+
     // 显示用户友好的错误提示
     const message = getErrorMessage(event.reason);
     showToast({

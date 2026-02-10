@@ -16,6 +16,7 @@ import type {
   ExportResult,
   VersionInfo,
   WordBookEntry,
+  ChapterSummary,
 } from '@shared/types';
 
 // 定义ElectronAPI接口
@@ -107,6 +108,15 @@ interface ElectronAPI {
     query: (sql: string, params?: any[]) => Promise<any[]>;
     execute: (sql: string, params?: any[]) => Promise<any>;
     transaction: (callback: any) => Promise<void>;
+  };
+
+  ai: {
+    summarizeChapter: (bookId: string, chapterIndex: number, options?: { forceRefresh?: boolean }) => Promise<ChapterSummary>;
+    summarizeChapters: (bookId: string, chapterIndices: number[], options?: { forceRefresh?: boolean }) => Promise<ChapterSummary[]>;
+    getSummary: (bookId: string, chapterIndex: number) => Promise<ChapterSummary | null>;
+    getAllSummaries: (bookId: string) => Promise<ChapterSummary[]>;
+    deleteSummary: (bookId: string, chapterIndex: number) => Promise<void>;
+    checkConfig: () => Promise<{ valid: boolean; error?: string }>;
   };
 
   sync: {
@@ -213,6 +223,21 @@ const electronAPI: ElectronAPI = {
     query: (sql, params) => ipcRenderer.invoke(IPCChannels.DB_QUERY, sql, params),
     execute: (sql, params) => ipcRenderer.invoke(IPCChannels.DB_EXECUTE, sql, params),
     transaction: (callback) => ipcRenderer.invoke(IPCChannels.DB_TRANSACTION, callback),
+  },
+
+  ai: {
+    summarizeChapter: (bookId, chapterIndex, options) => 
+      ipcRenderer.invoke(IPCChannels.AI_SUMMARIZE_CHAPTER, bookId, chapterIndex, options),
+    summarizeChapters: (bookId, chapterIndices, options) => 
+      ipcRenderer.invoke(IPCChannels.AI_SUMMARIZE_CHAPTERS, bookId, chapterIndices, options),
+    getSummary: (bookId, chapterIndex) => 
+      ipcRenderer.invoke(IPCChannels.AI_GET_SUMMARY, bookId, chapterIndex),
+    getAllSummaries: (bookId) => 
+      ipcRenderer.invoke(IPCChannels.AI_GET_ALL_SUMMARIES, bookId),
+    deleteSummary: (bookId, chapterIndex) => 
+      ipcRenderer.invoke(IPCChannels.AI_DELETE_SUMMARY, bookId, chapterIndex),
+    checkConfig: () => 
+      ipcRenderer.invoke(IPCChannels.AI_CHECK_CONFIG),
   },
 
   sync: {

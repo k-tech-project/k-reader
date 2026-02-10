@@ -70,6 +70,13 @@ const IPCChannels = {
   DB_QUERY: "db:query",
   DB_EXECUTE: "db:execute",
   DB_TRANSACTION: "db:transaction",
+  // AI 操作
+  AI_SUMMARIZE_CHAPTER: "ai:summarizeChapter",
+  AI_SUMMARIZE_CHAPTERS: "ai:summarizeChapters",
+  AI_GET_SUMMARY: "ai:getSummary",
+  AI_GET_ALL_SUMMARIES: "ai:getAllSummaries",
+  AI_DELETE_SUMMARY: "ai:deleteSummary",
+  AI_CHECK_CONFIG: "ai:checkConfig",
   // 同步操作
   SYNC_START: "sync:start",
   SYNC_STOP: "sync:stop",
@@ -160,6 +167,14 @@ const electronAPI = {
     query: (sql, params) => electron.ipcRenderer.invoke(IPCChannels.DB_QUERY, sql, params),
     execute: (sql, params) => electron.ipcRenderer.invoke(IPCChannels.DB_EXECUTE, sql, params),
     transaction: (callback) => electron.ipcRenderer.invoke(IPCChannels.DB_TRANSACTION, callback)
+  },
+  ai: {
+    summarizeChapter: (bookId, chapterIndex, options) => electron.ipcRenderer.invoke(IPCChannels.AI_SUMMARIZE_CHAPTER, bookId, chapterIndex, options),
+    summarizeChapters: (bookId, chapterIndices, options) => electron.ipcRenderer.invoke(IPCChannels.AI_SUMMARIZE_CHAPTERS, bookId, chapterIndices, options),
+    getSummary: (bookId, chapterIndex) => electron.ipcRenderer.invoke(IPCChannels.AI_GET_SUMMARY, bookId, chapterIndex),
+    getAllSummaries: (bookId) => electron.ipcRenderer.invoke(IPCChannels.AI_GET_ALL_SUMMARIES, bookId),
+    deleteSummary: (bookId, chapterIndex) => electron.ipcRenderer.invoke(IPCChannels.AI_DELETE_SUMMARY, bookId, chapterIndex),
+    checkConfig: () => electron.ipcRenderer.invoke(IPCChannels.AI_CHECK_CONFIG)
   },
   sync: {
     start: (options) => electron.ipcRenderer.invoke(IPCChannels.SYNC_START, options),

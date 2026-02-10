@@ -9,11 +9,12 @@ import { useElectronAPI } from '../../hooks/useElectronAPI';
 import type { ReaderLocation } from '../../modules/reader/services/EpubReader';
 import type { ReaderTheme } from '../../modules/reader/types/reader.types';
 import { PRESET_THEMES, PAGE_ANIMATIONS, type PageAnimationType } from '../../modules/reader/types/reader.types';
-import { ArrowLeft, ChevronLeft, ChevronRight, List, Settings, Type, Palette, Bookmark, MapPin, Search, X, Maximize, Speaker } from '../../utils/icons';
+import { ArrowLeft, ChevronLeft, ChevronRight, List, Settings, Type, Palette, Bookmark, MapPin, Search, X, Maximize, Speaker, DocumentText } from '../../utils/icons';
 import { toast } from '../../components/Toast';
 import { modal } from '../../components/Modal';
 import { TranslationPopup } from '../../components/TranslationPopup';
 import { TTSPlayer } from '../../components/TTSPlayer';
+import { ChapterSummaryPanel } from '../../modules/ai/components/ChapterSummaryPanel';
 
 export function Reader() {
   const { bookId } = useParams<{ bookId: string }>();
@@ -55,6 +56,9 @@ export function Reader() {
   // TTS状态
   const [showTTSPlayer, setShowTTSPlayer] = useState(false);
   const [ttsText, setTTSText] = useState('');
+
+  // AI 总结状态
+  const [showSummary, setShowSummary] = useState(false);
 
   // 阅读器设置
   const [fontSize, setFontSize] = useState(16);
@@ -820,6 +824,24 @@ export function Reader() {
             <Bookmark className="h-5 w-5" />
           </button>
 
+          {/* AI 总结按钮 */}
+          <button
+            onClick={() => {
+              console.log('[Reader] AI Summary button clicked, showSummary:', !showSummary);
+              console.log('[Reader] bookId:', bookId);
+              console.log('[Reader] currentChapter:', currentChapter);
+              console.log('[Reader] toc:', toc);
+              console.log('[Reader] chapterIndex:', currentChapter ? toc.findIndex(item => item.href === currentChapter.href) : 'N/A');
+              setShowSummary(!showSummary);
+            }}
+            className={`rounded p-2 hover:bg-gray-100 dark:hover:bg-gray-700 ${
+              showSummary ? 'bg-gray-100 dark:bg-gray-700' : ''
+            }`}
+            title="AI 章节总结"
+          >
+            <DocumentText className="h-5 w-5" />
+          </button>
+
           {/* 目录按钮 */}
           <button
             onClick={() => setShowToc(!showToc)}
@@ -1472,6 +1494,63 @@ export function Reader() {
               selection.removeAllRanges();
             }
           }}
+        />
+      )}
+
+      {/* AI 章节总结面板 */}
+      {(() => {
+        // 更健壮的章节匹配函数
+        const findChapterIndex = (targetHref: string): number => {
+          console.log('[Reader] Finding chapter index for:', targetHref);
+          console.log('[Reader] TOC hrefs:', toc.map((t, i) => `${i}: ${t.href}`));
+
+          // 首先尝试精确匹配
+          const exactMatch = toc.findIndex(item => item.href === targetHref);
+          if (exactMatch !== -1) {
+            console.log('[Reader] Found exact match at index:', exactMatch);
+            return exactMatch;
+          }
+
+          // 尝试部分匹配（去掉扩展名和路径）
+          const targetBase = targetHref.split('/').pop()?.replace('.xhtml', '').toLowerCase();
+          console.log('[Reader] Target base name:', targetBase);
+
+          const partialMatch = toc.findIndex(item => {
+            const itemBase = item.href.split('/').pop()?.replace('.xhtml', '').toLowerCase();
+            console.log('[Reader] Comparing with:', item.href, 'base:', itemBase);
+            return itemBase === targetBase || item.href.includes(targetBase) || targetHref.includes(item.href);
+          });
+
+          if (partialMatch !== -1) {
+            console.log('[Reader] Found partial match at index:', partialMatch);
+            return partialMatch;
+          }
+
+          console.log('[Reader] No match found, returning -1');
+          return -1;
+        };
+
+        const chapterIndex = currentChapter ? findChapterIndex(currentChapter.href) : 'N/A';
+
+        console.log('[Reader] Rendering AI Summary panel check:', {
+          showSummary,
+          bookId,
+          currentChapter,
+          tocLength: toc.length,
+          chapterIndex
+        });
+        return showSummary && bookId && currentChapter && chapterIndex !== -1;
+      })() && (
+        <ChapterSummaryPanel
+          bookId={bookId}
+          chapterIndex={toc.findIndex(item => {
+            // 使用相同的匹配逻辑
+            const targetBase = currentChapter.href.split('/').pop()?.replace('.xhtml', '').toLowerCase();
+            const itemBase = item.href.split('/').pop()?.replace('.xhtml', '').toLowerCase();
+            return item.href === currentChapter.href || itemBase === targetBase || item.href.includes(targetBase) || currentChapter.href.includes(item.href);
+          })}
+          chapterTitle={currentChapter.title}
+          onClose={() => setShowSummary(false)}
         />
       )}
     </div>

@@ -87,6 +87,14 @@ export const IPCChannels = {
   DB_EXECUTE: 'db:execute',
   DB_TRANSACTION: 'db:transaction',
 
+  // AI 操作
+  AI_SUMMARIZE_CHAPTER: 'ai:summarizeChapter',
+  AI_SUMMARIZE_CHAPTERS: 'ai:summarizeChapters',
+  AI_GET_SUMMARY: 'ai:getSummary',
+  AI_GET_ALL_SUMMARIES: 'ai:getAllSummaries',
+  AI_DELETE_SUMMARY: 'ai:deleteSummary',
+  AI_CHECK_CONFIG: 'ai:checkConfig',
+
   // 同步操作
   SYNC_START: 'sync:start',
   SYNC_STOP: 'sync:stop',

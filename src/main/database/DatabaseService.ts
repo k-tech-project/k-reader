@@ -225,6 +225,38 @@ export class DatabaseService {
 
       CREATE INDEX IF NOT EXISTS idx_translation_history_created ON translation_history(created_at DESC);
     `);
+
+    // 章节总结表
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS chapter_summaries (
+        id TEXT PRIMARY KEY,
+        book_id TEXT NOT NULL,
+        chapter_index INTEGER NOT NULL,
+        chapter_title TEXT,
+        summary TEXT NOT NULL,
+        model TEXT NOT NULL,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        UNIQUE(book_id, chapter_index),
+        FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_chapter_summaries_book ON chapter_summaries(book_id);
+      CREATE INDEX IF NOT EXISTS idx_chapter_summaries_book_chapter ON chapter_summaries(book_id, chapter_index);
+    `);
+
+    // AI 缓存表
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS ai_cache (
+        id TEXT PRIMARY KEY,
+        cache_key TEXT UNIQUE NOT NULL,
+        response TEXT NOT NULL,
+        model TEXT NOT NULL,
+        created_at INTEGER DEFAULT (strftime('%s', 'now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ai_cache_key ON ai_cache(cache_key);
+      CREATE INDEX IF NOT EXISTS idx_ai_cache_created ON ai_cache(created_at DESC);
+    `);
   }
 
   /**

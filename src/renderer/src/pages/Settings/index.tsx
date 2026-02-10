@@ -3,8 +3,10 @@
  */
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, BookOpen, Type, Palette, Keyboard, Save, Bookmark } from '../../utils/icons';
+import { ArrowLeft, BookOpen, Type, Palette, Keyboard, Save, Bookmark, Cpu, Sparkles } from '../../utils/icons';
 import { PRESET_THEMES, PAGE_ANIMATIONS, type ReaderTheme, type PageAnimationType } from '../../modules/reader/types/reader.types';
+import { useElectronAPI } from '../../hooks/useElectronAPI';
+import { toast } from '../../components/Toast';
 
 // 设置接口
 interface AppSettings {
@@ -31,10 +33,86 @@ const defaultSettings: AppSettings = {
   showReadProgress: true,
 };
 
+// AI设置接口
+interface AISettings {
+  enabled: boolean;
+  provider: 'openai' | 'claude' | 'zhipu' | 'qianwen' | 'custom';
+  apiKey: string;
+  baseURL?: string;
+  model: string;
+  temperature: number;
+  maxTokens: number;
+}
+
+const defaultAISettings: AISettings = {
+  enabled: false,
+  provider: 'openai',
+  apiKey: '',
+  model: 'gpt-4o-mini',
+  temperature: 0.7,
+  maxTokens: 1000,
+};
+
+// AI提供商配置
+const AI_PROVIDERS: Record<
+  AISettings['provider'],
+  {
+    name: string;
+    description: string;
+    models: string[];
+    defaultModel: string;
+    needsBaseURL: boolean;
+    defaultBaseURL?: string;
+    needsCustomModelName?: boolean;
+  }
+> = {
+  openai: {
+    name: 'OpenAI',
+    description: 'GPT-4、GPT-4o 等模型',
+    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'],
+    defaultModel: 'gpt-4o-mini',
+    needsBaseURL: false,
+  },
+  claude: {
+    name: 'Claude (Anthropic)',
+    description: 'Claude 3.5 Sonnet、Opus 等模型',
+    models: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-opus-20240229', 'claude-3-sonnet-20240229'],
+    defaultModel: 'claude-3-5-sonnet-20241022',
+    needsBaseURL: false,
+  },
+  zhipu: {
+    name: '智谱AI (GLM-4)',
+    description: '国产大模型，兼容OpenAI接口',
+    models: ['glm-4.7', 'glm-4-flash', 'glm-3-turbo'],
+    defaultModel: 'glm-4.7',
+    needsBaseURL: true,
+    defaultBaseURL: 'https://open.bigmodel.cn/api/coding/paas/v4',
+  },
+  qianwen: {
+    name: '通义千问',
+    description: '阿里云大模型，兼容OpenAI接口',
+    models: ['qwen-turbo', 'qwen-plus', 'qwen-max'],
+    defaultModel: 'qwen-turbo',
+    needsBaseURL: true,
+    defaultBaseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  },
+  custom: {
+    name: '自定义模型',
+    description: '配置兼容 OpenAI API 的自定义端点',
+    models: [], // 空数组，使用自定义输入
+    defaultModel: '',
+    needsBaseURL: true,
+    needsCustomModelName: true,
+  },
+};
+
 export function Settings() {
   const navigate = useNavigate();
+  const api = useElectronAPI();
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [hasChanges, setHasChanges] = useState(false);
+  const [aiSettings, setAISettings] = useState<AISettings>(defaultAISettings);
+  const [testingAI, setTestingAI] = useState(false);
 
   // 加载设置
   useEffect(() => {
@@ -46,24 +124,92 @@ export function Settings() {
         console.error('Failed to parse settings:', error);
       }
     }
+
+    // 加载AI设置
+    loadAISettings();
   }, []);
 
+  const loadAISettings = async () => {
+    try {
+      const savedAI = await api.settings.get('ai');
+      if (savedAI) {
+        setAISettings(savedAI);
+      }
+    } catch (error) {
+      console.error('Failed to load AI settings:', error);
+    }
+  };
+
   // 保存设置
-  const handleSave = () => {
+  const handleSave = async () => {
     localStorage.setItem('app:settings', JSON.stringify(settings));
+
+    // 保存AI设置
+    try {
+      await api.settings.set('ai', aiSettings);
+      toast.success('设置已保存');
+    } catch (error) {
+      console.error('Failed to save AI settings:', error);
+      toast.error('AI设置保存失败');
+    }
+
     setHasChanges(false);
-    // TODO: 显示保存成功提示
   };
 
   // 重置设置
   const handleReset = () => {
     setSettings(defaultSettings);
+    setAISettings(defaultAISettings);
     setHasChanges(true);
   };
 
   // 更新设置
   const updateSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
+    setHasChanges(true);
+  };
+
+  // 更新AI设置
+  const updateAISetting = <K extends keyof AISettings>(key: K, value: AISettings[K]) => {
+    setAISettings((prev) => ({ ...prev, [key]: value }));
+    setHasChanges(true);
+  };
+
+  // 测试AI配置
+  const handleTestAI = async () => {
+    if (!aiSettings.apiKey) {
+      toast.warning('请先输入 API Key');
+      return;
+    }
+
+    setTestingAI(true);
+    try {
+      // 临时保存配置进行测试
+      await api.settings.set('ai', aiSettings);
+      const result = await api.ai.checkConfig();
+
+      if (result.valid) {
+        toast.success('AI 配置验证成功！');
+      } else {
+        toast.error(`配置验证失败: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('AI config test failed:', error);
+      toast.error('配置验证失败，请检查设置');
+    } finally {
+      setTestingAI(false);
+    }
+  };
+
+  // 切换提供商时更新默认配置
+  const handleProviderChange = (provider: AISettings['provider']) => {
+    const providerConfig = AI_PROVIDERS[provider];
+    setAISettings((prev) => ({
+      ...prev,
+      provider,
+      model: providerConfig.defaultModel,
+      baseURL: providerConfig.needsBaseURL ? providerConfig.defaultBaseURL : '',
+    }));
     setHasChanges(true);
   };
 
@@ -368,6 +514,195 @@ export function Settings() {
               <Bookmark className="h-4 w-4" />
               <span>打开生词本</span>
             </button>
+          </section>
+
+          {/* AI 设置 */}
+          <section className="rounded-lg bg-white p-6 shadow-sm dark:bg-gray-800">
+            <h2 className="mb-4 flex items-center text-lg font-semibold text-gray-900 dark:text-white">
+              <Sparkles className="mr-2 h-5 w-5" />
+              AI 功能设置
+            </h2>
+
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+              配置 AI 模型用于章节总结功能。支持 OpenAI、Claude、智谱AI、通义千问等。
+            </p>
+
+            <div className="space-y-6">
+              {/* 启用AI */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">启用 AI 功能</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">开启后可使用AI章节总结</p>
+                </div>
+                <button
+                  onClick={() => updateAISetting('enabled', !aiSettings.enabled)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    aiSettings.enabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      aiSettings.enabled ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {aiSettings.enabled && (
+                <>
+                  {/* AI提供商选择 */}
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      AI 提供商
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      {(Object.entries(AI_PROVIDERS) as [AISettings['provider'], typeof AI_PROVIDERS[keyof typeof AI_PROVIDERS]][]).map(([key, provider]) => (
+                        <button
+                          key={key}
+                          onClick={() => handleProviderChange(key)}
+                          className={`rounded-lg border p-3 text-left transition-all ${
+                            aiSettings.provider === key
+                              ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                              : 'border-gray-300 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700'
+                          }`}
+                        >
+                          <div className="font-medium text-gray-900 dark:text-white">{provider.name}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{provider.description}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* API Key */}
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      API Key <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="password"
+                      value={aiSettings.apiKey}
+                      onChange={(e) => updateAISetting('apiKey', e.target.value)}
+                      placeholder="输入你的 API Key"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                    />
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      {aiSettings.provider === 'claude' && '在 Anthropic 控制台获取: console.anthropic.com'}
+                      {aiSettings.provider === 'openai' && '在 OpenAI 控制台获取: platform.openai.com'}
+                      {aiSettings.provider === 'zhipu' && '在智谱AI开放平台获取: open.bigmodel.cn'}
+                      {aiSettings.provider === 'qianwen' && '在阿里云百炼平台获取: dashscope.aliyuncs.com'}
+                      {aiSettings.provider === 'custom' && '输入你的自定义 API 密钥'}
+                    </p>
+                  </div>
+
+                  {/* 自定义 API 端点 */}
+                  {AI_PROVIDERS[aiSettings.provider].needsBaseURL && (
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        API 端点 (Base URL) <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={aiSettings.baseURL || ''}
+                        onChange={(e) => updateAISetting('baseURL', e.target.value)}
+                        placeholder="https://api.example.com/v1"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        使用自定义 API 端点或代理
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 模型选择 */}
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      模型
+                    </label>
+                    {AI_PROVIDERS[aiSettings.provider].needsCustomModelName ? (
+                      <input
+                        type="text"
+                        value={aiSettings.model}
+                        onChange={(e) => updateAISetting('model', e.target.value)}
+                        placeholder="输入模型名称，如 gpt-3.5-turbo"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                      />
+                    ) : (
+                      <select
+                        value={aiSettings.model}
+                        onChange={(e) => updateAISetting('model', e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                      >
+                        {AI_PROVIDERS[aiSettings.provider].models.map((model) => (
+                          <option key={model} value={model}>
+                            {model}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+
+                  {/* Temperature */}
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Temperature: {aiSettings.temperature}
+                    </label>
+                    <div className="flex items-center space-x-4">
+                      <input
+                        type="range"
+                        min="0"
+                        max="2"
+                        step="0.1"
+                        value={aiSettings.temperature}
+                        onChange={(e) => updateAISetting('temperature', parseFloat(e.target.value))}
+                        className="flex-1"
+                      />
+                      <span className="min-w-[3rem] text-center text-sm text-gray-900 dark:text-white">
+                        {aiSettings.temperature}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      控制输出随机性。值越低输出越确定，值越高输出越随机
+                    </p>
+                  </div>
+
+                  {/* Max Tokens */}
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      最大 Tokens: {aiSettings.maxTokens}
+                    </label>
+                    <div className="flex items-center space-x-4">
+                      <input
+                        type="range"
+                        min="100"
+                        max="4000"
+                        step="100"
+                        value={aiSettings.maxTokens}
+                        onChange={(e) => updateAISetting('maxTokens', parseInt(e.target.value))}
+                        className="flex-1"
+                      />
+                      <span className="min-w-[4rem] text-center text-sm text-gray-900 dark:text-white">
+                        {aiSettings.maxTokens}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      控制单次生成的最大长度
+                    </p>
+                  </div>
+
+                  {/* 测试按钮 */}
+                  <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                    <button
+                      onClick={handleTestAI}
+                      disabled={testingAI || !aiSettings.apiKey}
+                      className="inline-flex items-center space-x-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <Cpu className={`h-4 w-4 ${testingAI ? 'animate-spin' : ''}`} />
+                      <span>{testingAI ? '验证中...' : '验证配置'}</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </section>
         </div>
       </div>
