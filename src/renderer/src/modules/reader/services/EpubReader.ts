@@ -114,7 +114,7 @@ export class EpubReader {
       const renditionOptions: EpubRenditionOptions = {
         width: '100%',
         height: '100%',
-        spread: 'auto',
+        spread: 'none',
         flow: this.settings.readingMode === 'paginated' ? 'paginated' : 'scrolled',
         allowScriptedContent: true, // 允许 iframe 中执行脚本
         allowPopups: false, // 不允许弹窗

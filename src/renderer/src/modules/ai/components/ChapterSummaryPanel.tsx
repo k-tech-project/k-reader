@@ -15,6 +15,8 @@ interface ChapterSummaryPanelProps {
   chapterIndex: number;
   chapterTitle?: string;
   onClose?: () => void;
+  /** 嵌入在阅读页右侧栏时使用，不使用 fixed 定位 */
+  embedded?: boolean;
 }
 
 export function ChapterSummaryPanel({
@@ -22,6 +24,7 @@ export function ChapterSummaryPanel({
   chapterIndex,
   chapterTitle,
   onClose,
+  embedded = false,
 }: ChapterSummaryPanelProps) {
   console.log('[ChapterSummaryPanel] Component mounted with props:', {
     bookId,
@@ -81,11 +84,15 @@ export function ChapterSummaryPanel({
     isGenerating,
   });
 
+  const panelBaseClass = embedded
+    ? 'h-full w-full bg-white dark:bg-gray-800 p-6 overflow-y-auto'
+    : 'fixed right-0 top-0 bottom-0 w-96 bg-white dark:bg-gray-800 shadow-lg p-6 overflow-y-auto z-50';
+
   // 渲染配置错误
   if (aiConfig && !aiConfig.valid) {
     console.log('[ChapterSummaryPanel] Rendering config error view');
     return (
-      <div className="fixed right-0 top-0 bottom-0 w-96 bg-white dark:bg-gray-800 shadow-lg p-6 overflow-y-auto">
+      <div className={panelBaseClass}>
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-bold text-gray-900 dark:text-white">
             章节总结
@@ -117,7 +124,7 @@ export function ChapterSummaryPanel({
 
   console.log('[ChapterSummaryPanel] Rendering main panel');
   return (
-    <div className="fixed right-0 top-0 bottom-0 w-96 bg-white dark:bg-gray-800 shadow-lg p-6 overflow-y-auto z-50">
+    <div className={panelBaseClass}>
       {/* 标题栏 */}
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-bold text-gray-900 dark:text-white">

@@ -22,7 +22,7 @@ export function Reader() {
   const api = useElectronAPI();
   const viewerRef = useRef<EpubViewerRef>(null);
 
-  const [showToc, setShowToc] = useState(false);
+  const [showToc, setShowToc] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<'toc' | 'bookmarks' | 'highlights'>('toc'); // 侧边栏标签页
   const [currentProgress, setCurrentProgress] = useState(0);
@@ -57,8 +57,8 @@ export function Reader() {
   const [showTTSPlayer, setShowTTSPlayer] = useState(false);
   const [ttsText, setTTSText] = useState('');
 
-  // AI 总结状态
-  const [showSummary, setShowSummary] = useState(false);
+  // AI 辅助阅读状态
+  const [showSummary, setShowSummary] = useState(true);
 
   // 阅读器设置
   const [fontSize, setFontSize] = useState(16);
@@ -387,6 +387,17 @@ export function Reader() {
     }
     traverse(items);
     return result;
+  };
+
+  // 根据章节 href 在 toc 中查找索引（用于 AI 面板）
+  const findChapterIndexInToc = (targetHref: string, items: any[]): number => {
+    const exact = items.findIndex((item: any) => item.href === targetHref);
+    if (exact !== -1) return exact;
+    const targetBase = targetHref.split('/').pop()?.replace('.xhtml', '').toLowerCase();
+    return items.findIndex((item: any) => {
+      const itemBase = item.href.split('/').pop()?.replace('.xhtml', '').toLowerCase();
+      return itemBase === targetBase || item.href.includes(targetBase) || targetHref.includes(item.href);
+    });
   };
 
   // 跳转到书签
@@ -890,11 +901,11 @@ export function Reader() {
 
       {/* 主内容区域 */}
       <div className="flex flex-1 overflow-hidden">
-        {/* 侧边栏 - 目录/书签 */}
+        {/* 左侧 - 目录/书签/高亮（可隐藏） */}
         {showToc && (
-          <div className="w-64 border-r border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 overflow-y-auto flex flex-col">
+          <div className="w-64 border-r border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 overflow-y-auto flex flex-col flex-shrink-0">
             <div className="sticky top-0 border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
-              <div className="flex">
+              <div className="flex items-center">
                 <button
                   onClick={() => setSidebarTab('toc')}
                   className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
@@ -924,6 +935,13 @@ export function Reader() {
                   }`}
                 >
                   高亮 ({highlights.length})
+                </button>
+                <button
+                  onClick={() => setShowToc(false)}
+                  className="flex-shrink-0 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                  title="收起目录"
+                >
+                  <X className="h-4 w-4" />
                 </button>
               </div>
             </div>
@@ -1042,7 +1060,7 @@ export function Reader() {
           </div>
         )}
 
-        {/* 阅读器区域 */}
+        {/* 阅读器区域 - 中间主体 */}
         <div className="flex-1 overflow-hidden" id="epub-viewer-container">
           {book && (
             <EpubViewer
@@ -1059,118 +1077,41 @@ export function Reader() {
           )}
         </div>
 
-        {/* 设置侧边栏 */}
-        {showSettings && (
-          <div className="w-80 border-l border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 overflow-y-auto">
-            <div className="sticky top-0 flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
-              <h3 className="font-semibold text-gray-900 dark:text-white">阅读设置</h3>
+        {/* 右侧 - AI 辅助阅读（可隐藏） */}
+        {showSummary && (
+          <div className="w-96 border-l border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 flex flex-col overflow-hidden flex-shrink-0">
+            <div className="sticky top-0 flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800 flex-shrink-0">
+              <h3 className="font-semibold text-gray-900 dark:text-white">AI 辅助阅读</h3>
+              <button
+                onClick={() => setShowSummary(false)}
+                className="rounded p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                title="关闭"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
-            <div className="p-4 space-y-6">
-              {/* 字体设置 */}
-              <div>
-                <h4 className="mb-3 flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
-                  <Type className="mr-2 h-4 w-4" />
-                  字体大小
-                </h4>
-                <div className="flex items-center justify-between space-x-2">
-                  <button
-                    onClick={handleDecreaseFontSize}
-                    className="rounded-lg border border-gray-300 px-3 py-1 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-700"
-                    title="减小字体 (-)"
-                  >
-                    -
-                  </button>
-                  <span className="text-sm text-gray-900 dark:text-white min-w-[3rem] text-center">
-                    {fontSize}
-                  </span>
-                  <button
-                    onClick={handleIncreaseFontSize}
-                    className="rounded-lg border border-gray-300 px-3 py-1 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-700"
-                    title="增大字体 (+)"
-                  >
-                    +
-                  </button>
+            <div className="flex-1 overflow-hidden min-h-0">
+              {bookId && currentChapter && (() => {
+                const idx = findChapterIndexInToc(currentChapter.href, toc);
+                return idx >= 0 ? (
+                  <ChapterSummaryPanel
+                    bookId={bookId}
+                    chapterIndex={idx}
+                    chapterTitle={currentChapter.title}
+                    onClose={() => setShowSummary(false)}
+                    embedded
+                  />
+                ) : (
+                  <div className="p-4 text-sm text-gray-500 dark:text-gray-400 text-center">
+                    当前无章节信息，请开始阅读
+                  </div>
+                );
+              })()}
+              {(!bookId || !currentChapter) && (
+                <div className="p-4 text-sm text-gray-500 dark:text-gray-400 text-center">
+                  请等待目录加载或开始阅读
                 </div>
-              </div>
-
-              {/* 主题设置 */}
-              <div>
-                <h4 className="mb-3 flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
-                  <Palette className="mr-2 h-4 w-4" />
-                  阅读主题
-                </h4>
-                <div className="grid grid-cols-3 gap-2">
-                  {Object.values(PRESET_THEMES).map((theme) => (
-                    <button
-                      key={theme.id}
-                      onClick={() => handleThemeChange(theme)}
-                      className={`rounded-lg border p-2 text-xs font-medium transition-all ${
-                        currentTheme.id === theme.id
-                          ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/20'
-                          : 'border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700'
-                      }`}
-                      style={{
-                        backgroundColor: theme.id === 'light' ? undefined : theme.background,
-                        color: theme.id === 'light' ? undefined : theme.color,
-                      }}
-                    >
-                      {theme.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* 翻页动画设置 */}
-              <div>
-                <h4 className="mb-3 flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
-                  翻页动画
-                </h4>
-                <div className="grid grid-cols-2 gap-2">
-                  {Object.entries(PAGE_ANIMATIONS).map(([key, { name, description }]) => (
-                    <button
-                      key={key}
-                      onClick={() => handlePageAnimationChange(key as PageAnimationType)}
-                      className={`rounded-lg border p-2 text-xs transition-all ${
-                        pageAnimation === key
-                          ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/20'
-                          : 'border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700'
-                      }`}
-                      title={description}
-                    >
-                      {name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* 快捷键说明 */}
-              <div>
-                <h4 className="mb-3 flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
-                  快捷键
-                </h4>
-                <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-                  <div className="flex justify-between">
-                    <span>翻页</span>
-                    <span className="font-mono">←/→</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>目录</span>
-                    <span className="font-mono">T</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>设置</span>
-                    <span className="font-mono">S</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>字号</span>
-                    <span className="font-mono">+/-</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>返回</span>
-                    <span className="font-mono">Esc</span>
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
           </div>
         )}
@@ -1481,6 +1422,129 @@ export function Reader() {
         </div>
       )}
 
+      {/* 阅读设置弹窗 */}
+      {showSettings && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setShowSettings(false)}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto border border-gray-200 dark:border-gray-700"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 flex items-center justify-between border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 px-4 py-3">
+              <h3 className="font-semibold text-gray-900 dark:text-white">阅读设置</h3>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="rounded p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-4 space-y-6">
+              <div>
+                <h4 className="mb-3 flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <Type className="mr-2 h-4 w-4" />
+                  字体大小
+                </h4>
+                <div className="flex items-center justify-between space-x-2">
+                  <button
+                    onClick={handleDecreaseFontSize}
+                    className="rounded-lg border border-gray-300 px-3 py-1 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-700"
+                    title="减小字体 (-)"
+                  >
+                    -
+                  </button>
+                  <span className="text-sm text-gray-900 dark:text-white min-w-[3rem] text-center">
+                    {fontSize}
+                  </span>
+                  <button
+                    onClick={handleIncreaseFontSize}
+                    className="rounded-lg border border-gray-300 px-3 py-1 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-700"
+                    title="增大字体 (+)"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+              <div>
+                <h4 className="mb-3 flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <Palette className="mr-2 h-4 w-4" />
+                  阅读主题
+                </h4>
+                <div className="grid grid-cols-3 gap-2">
+                  {Object.values(PRESET_THEMES).map((theme) => (
+                    <button
+                      key={theme.id}
+                      onClick={() => handleThemeChange(theme)}
+                      className={`rounded-lg border p-2 text-xs font-medium transition-all ${
+                        currentTheme.id === theme.id
+                          ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/20'
+                          : 'border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700'
+                      }`}
+                      style={{
+                        backgroundColor: theme.id === 'light' ? undefined : theme.background,
+                        color: theme.id === 'light' ? undefined : theme.color,
+                      }}
+                    >
+                      {theme.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <h4 className="mb-3 flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
+                  翻页动画
+                </h4>
+                <div className="grid grid-cols-2 gap-2">
+                  {Object.entries(PAGE_ANIMATIONS).map(([key, { name, description }]) => (
+                    <button
+                      key={key}
+                      onClick={() => handlePageAnimationChange(key as PageAnimationType)}
+                      className={`rounded-lg border p-2 text-xs transition-all ${
+                        pageAnimation === key
+                          ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/20'
+                          : 'border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700'
+                      }`}
+                      title={description}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <h4 className="mb-3 flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
+                  快捷键
+                </h4>
+                <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                  <div className="flex justify-between">
+                    <span>翻页</span>
+                    <span className="font-mono">←/→</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>目录</span>
+                    <span className="font-mono">T</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>设置</span>
+                    <span className="font-mono">S</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>字号</span>
+                    <span className="font-mono">+/-</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>返回</span>
+                    <span className="font-mono">Esc</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 翻译弹窗 */}
       {showTranslationPopup && selectedText && (
         <TranslationPopup
@@ -1497,62 +1561,6 @@ export function Reader() {
         />
       )}
 
-      {/* AI 章节总结面板 */}
-      {(() => {
-        // 更健壮的章节匹配函数
-        const findChapterIndex = (targetHref: string): number => {
-          console.log('[Reader] Finding chapter index for:', targetHref);
-          console.log('[Reader] TOC hrefs:', toc.map((t, i) => `${i}: ${t.href}`));
-
-          // 首先尝试精确匹配
-          const exactMatch = toc.findIndex(item => item.href === targetHref);
-          if (exactMatch !== -1) {
-            console.log('[Reader] Found exact match at index:', exactMatch);
-            return exactMatch;
-          }
-
-          // 尝试部分匹配（去掉扩展名和路径）
-          const targetBase = targetHref.split('/').pop()?.replace('.xhtml', '').toLowerCase();
-          console.log('[Reader] Target base name:', targetBase);
-
-          const partialMatch = toc.findIndex(item => {
-            const itemBase = item.href.split('/').pop()?.replace('.xhtml', '').toLowerCase();
-            console.log('[Reader] Comparing with:', item.href, 'base:', itemBase);
-            return itemBase === targetBase || item.href.includes(targetBase) || targetHref.includes(item.href);
-          });
-
-          if (partialMatch !== -1) {
-            console.log('[Reader] Found partial match at index:', partialMatch);
-            return partialMatch;
-          }
-
-          console.log('[Reader] No match found, returning -1');
-          return -1;
-        };
-
-        const chapterIndex = currentChapter ? findChapterIndex(currentChapter.href) : 'N/A';
-
-        console.log('[Reader] Rendering AI Summary panel check:', {
-          showSummary,
-          bookId,
-          currentChapter,
-          tocLength: toc.length,
-          chapterIndex
-        });
-        return showSummary && bookId && currentChapter && chapterIndex !== -1;
-      })() && (
-        <ChapterSummaryPanel
-          bookId={bookId}
-          chapterIndex={toc.findIndex(item => {
-            // 使用相同的匹配逻辑
-            const targetBase = currentChapter.href.split('/').pop()?.replace('.xhtml', '').toLowerCase();
-            const itemBase = item.href.split('/').pop()?.replace('.xhtml', '').toLowerCase();
-            return item.href === currentChapter.href || itemBase === targetBase || item.href.includes(targetBase) || currentChapter.href.includes(item.href);
-          })}
-          chapterTitle={currentChapter.title}
-          onClose={() => setShowSummary(false)}
-        />
-      )}
     </div>
   );
 }
