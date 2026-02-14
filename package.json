@@ -1,5 +1,5 @@
 {
-  "name": "k-auto-reader",
+  "name": "k-reader",
   "version": "1.0.0",
   "description": "An Electron application with React and TypeScript",
   "main": "./dist-electron/main/index.js",

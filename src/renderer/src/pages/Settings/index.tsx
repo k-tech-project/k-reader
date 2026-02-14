@@ -33,17 +33,28 @@ const defaultSettings: AppSettings = {
   showReadProgress: true,
 };
 
-// AI设置接口
+/**
+ * AI 设置接口
+ * 定义 AI 功能所需的配置项
+ */
 interface AISettings {
+  /** 是否启用 AI 功能 */
   enabled: boolean;
+  /** AI 提供商类型 */
   provider: 'openai' | 'claude' | 'zhipu' | 'qianwen' | 'custom';
+  /** API 密钥 */
   apiKey: string;
+  /** 自定义 API 端点（可选，用于代理或自定义服务） */
   baseURL?: string;
+  /** 模型名称 */
   model: string;
+  /** 温度参数（0-2，控制输出随机性） */
   temperature: number;
+  /** 最大生成 Token 数量 */
   maxTokens: number;
 }
 
+/** AI 设置默认值 */
 const defaultAISettings: AISettings = {
   enabled: false,
   provider: 'openai',
@@ -53,19 +64,38 @@ const defaultAISettings: AISettings = {
   maxTokens: 1000,
 };
 
-// AI提供商配置
+/**
+ * AI 提供商配置映射表
+ *
+ * 定义各个 AI 提供商的展示信息和配置项
+ * - name: 提供商显示名称
+ * - description: 提供商描述
+ * - models: 支持的模型列表（为空时使用自定义输入）
+ * - defaultModel: 默认模型
+ * - needsBaseURL: 是否需要配置自定义端点
+ * - defaultBaseURL: 默认端点地址
+ * - needsCustomModelName: 是否需要手动输入模型名称
+ */
 const AI_PROVIDERS: Record<
   AISettings['provider'],
   {
+    /** 提供商显示名称 */
     name: string;
+    /** 提供商描述信息 */
     description: string;
+    /** 支持的模型列表（空数组表示需要手动输入） */
     models: string[];
+    /** 默认模型名称 */
     defaultModel: string;
+    /** 是否需要配置 Base URL */
     needsBaseURL: boolean;
+    /** 默认 Base URL */
     defaultBaseURL?: string;
+    /** 是否需要自定义模型名称输入 */
     needsCustomModelName?: boolean;
   }
 > = {
+  /** OpenAI 提供商配置 */
   openai: {
     name: 'OpenAI',
     description: 'GPT-4、GPT-4o 等模型',
@@ -73,6 +103,8 @@ const AI_PROVIDERS: Record<
     defaultModel: 'gpt-4o-mini',
     needsBaseURL: false,
   },
+
+  /** Claude (Anthropic) 提供商配置 */
   claude: {
     name: 'Claude (Anthropic)',
     description: 'Claude 3.5 Sonnet、Opus 等模型',
@@ -80,6 +112,8 @@ const AI_PROVIDERS: Record<
     defaultModel: 'claude-3-5-sonnet-20241022',
     needsBaseURL: false,
   },
+
+  /** 智谱 AI 提供商配置 */
   zhipu: {
     name: '智谱AI (GLM-4)',
     description: '国产大模型，兼容OpenAI接口',
@@ -88,6 +122,8 @@ const AI_PROVIDERS: Record<
     needsBaseURL: true,
     defaultBaseURL: 'https://open.bigmodel.cn/api/coding/paas/v4',
   },
+
+  /** 通义千问提供商配置 */
   qianwen: {
     name: '通义千问',
     description: '阿里云大模型，兼容OpenAI接口',
@@ -96,13 +132,15 @@ const AI_PROVIDERS: Record<
     needsBaseURL: true,
     defaultBaseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   },
+
+  /** 自定义模型提供商配置 */
   custom: {
     name: '自定义模型',
     description: '配置兼容 OpenAI API 的自定义端点',
-    models: [], // 空数组，使用自定义输入
+    models: [], // 空数组，表示使用自定义文本输入
     defaultModel: '',
     needsBaseURL: true,
-    needsCustomModelName: true,
+    needsCustomModelName: true, // 标记需要手动输入模型名称
   },
 };
 
@@ -129,6 +167,10 @@ export function Settings() {
     loadAISettings();
   }, []);
 
+  /**
+   * 加载 AI 设置
+   * 从本地存储中读取已保存的 AI 配置
+   */
   const loadAISettings = async () => {
     try {
       const savedAI = await api.settings.get('ai');
@@ -136,47 +178,72 @@ export function Settings() {
         setAISettings(savedAI);
       }
     } catch (error) {
-      console.error('Failed to load AI settings:', error);
+      console.error('加载 AI 设置失败:', error);
     }
   };
 
-  // 保存设置
+  /**
+   * 保存设置
+   * 将应用设置和 AI 设置持久化到本地存储
+   */
   const handleSave = async () => {
+    // 保存应用设置到 localStorage
     localStorage.setItem('app:settings', JSON.stringify(settings));
 
-    // 保存AI设置
+    // 保存 AI 设置到 Electron 主进程
     try {
       await api.settings.set('ai', aiSettings);
       toast.success('设置已保存');
     } catch (error) {
-      console.error('Failed to save AI settings:', error);
+      console.error('保存 AI 设置失败:', error);
       toast.error('AI设置保存失败');
     }
 
     setHasChanges(false);
   };
 
-  // 重置设置
+  /**
+   * 重置设置
+   * 将所有设置恢复为默认值
+   */
   const handleReset = () => {
     setSettings(defaultSettings);
     setAISettings(defaultAISettings);
     setHasChanges(true);
   };
 
-  // 更新设置
+  /**
+   * 更新应用设置
+   * @param key 设置项的键名
+   * @param value 设置项的新值
+   */
   const updateSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
     setHasChanges(true);
   };
 
-  // 更新AI设置
+  /**
+   * 更新 AI 设置
+   * @param key 设置项的键名
+   * @param value 设置项的新值
+   */
   const updateAISetting = <K extends keyof AISettings>(key: K, value: AISettings[K]) => {
     setAISettings((prev) => ({ ...prev, [key]: value }));
     setHasChanges(true);
   };
 
-  // 测试AI配置
+  /**
+   * 测试 AI 配置
+   * 验证当前 AI 设置是否正确可用
+   *
+   * 步骤：
+   * 1. 检查是否已配置 API Key
+   * 2. 临时保存当前配置到主进程
+   * 3. 调用主进程验证 API 连接
+   * 4. 显示验证结果
+   */
   const handleTestAI = async () => {
+    // 验证是否已输入 API Key
     if (!aiSettings.apiKey) {
       toast.warning('请先输入 API Key');
       return;
@@ -184,8 +251,9 @@ export function Settings() {
 
     setTestingAI(true);
     try {
-      // 临时保存配置进行测试
+      // 临时保存当前配置到主进程进行测试
       await api.settings.set('ai', aiSettings);
+      // 调用主进程的配置验证接口
       const result = await api.ai.checkConfig();
 
       if (result.valid) {
@@ -201,9 +269,15 @@ export function Settings() {
     }
   };
 
-  // 切换提供商时更新默认配置
+  /**
+   * 切换 AI 提供商时的处理函数
+   * 根据选择的提供商更新相关配置（模型、Base URL 等）
+   *
+   * @param provider 目标提供商类型
+   */
   const handleProviderChange = (provider: AISettings['provider']) => {
     const providerConfig = AI_PROVIDERS[provider];
+    // 更新 AI 设置，使用新提供商的默认配置
     setAISettings((prev) => ({
       ...prev,
       provider,
@@ -618,7 +692,9 @@ export function Settings() {
                     <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                       模型
                     </label>
+                    {/* 根据提供商类型决定使用文本输入框还是下拉选择框 */}
                     {AI_PROVIDERS[aiSettings.provider].needsCustomModelName ? (
+                      // 自定义模型：使用文本输入框，让用户手动输入模型名称
                       <input
                         type="text"
                         value={aiSettings.model}
@@ -627,6 +703,7 @@ export function Settings() {
                         className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
                       />
                     ) : (
+                      // 预设模型：使用下拉选择框，从预定义的模型列表中选择
                       <select
                         value={aiSettings.model}
                         onChange={(e) => updateAISetting('model', e.target.value)}

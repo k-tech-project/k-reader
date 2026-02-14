@@ -2682,15 +2682,23 @@ class QianwenProvider {
   }
 }
 class CustomProvider {
+  /** Provider 标识符 */
   provider = "custom";
+  /** LangChain ChatOpenAI 模型实例 */
   model;
+  /** 模型名称 */
   modelName;
+  /**
+   * 构造函数
+   * @param config AI 配置对象，必须包含 baseURL、apiKey 等信息
+   * @throws {Error} 当未配置 baseURL 时抛出异常
+   */
   constructor(config) {
     if (!config.baseURL) {
       throw new Error("自定义模型需要配置 Base URL");
     }
     this.modelName = config.model || "gpt-3.5-turbo";
-    console.log("[CustomProvider] Initializing with:", {
+    console.log("[CustomProvider] 初始化自定义模型提供商:", {
       model: this.modelName,
       baseURL: config.baseURL,
       temperature: config.temperature,
@@ -2704,14 +2712,27 @@ class CustomProvider {
       apiKey: config.apiKey,
       configuration: {
         baseURL: config.baseURL
+        // 自定义 API 端点
       }
     });
-    console.log("[CustomProvider] Initialized successfully");
+    console.log("[CustomProvider] 自定义模型提供商初始化成功");
   }
+  /**
+   * 生成文本（非流式）
+   * @param prompt 输入提示词
+   * @param _options 生成选项（未使用，保留以兼容接口）
+   * @returns 生成的文本内容
+   */
   async generateText(prompt, _options) {
     const response = await this.model.invoke(prompt);
     return response.content;
   }
+  /**
+   * 生成文本（流式）
+   * @param prompt 输入提示词
+   * @param _options 生成选项（未使用，保留以兼容接口）
+   * @returns 异步可迭代对象，逐块返回生成的文本
+   */
   async *generateStream(prompt, _options) {
     const stream = await this.model.stream(prompt);
     for await (const chunk of stream) {
@@ -2720,6 +2741,12 @@ class CustomProvider {
       }
     }
   }
+  /**
+   * 统计文本的 Token 数量（估算值）
+   * 使用通用估算方式：中文约 1.3 token/字符，英文约 0.3 token/字符
+   * @param text 待统计的文本
+   * @returns 估算的 Token 数量
+   */
   countTokens(text) {
     const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
     const otherChars = text.length - chineseChars;
@@ -2727,7 +2754,7 @@ class CustomProvider {
   }
 }
 function createProvider(config) {
-  console.log("[createProvider] Creating provider with config:", {
+  console.log("[createProvider] 创建 AI Provider，配置信息:", {
     provider: config.provider,
     model: config.model,
     baseURL: config.baseURL,
@@ -2744,30 +2771,30 @@ function createProvider(config) {
   let provider;
   switch (config.provider) {
     case "openai":
-      console.log("[createProvider] Creating OpenAIProvider");
+      console.log("[createProvider] 创建 OpenAI Provider");
       provider = new OpenAIProvider(config);
       break;
     case "claude":
-      console.log("[createProvider] Creating AnthropicProvider");
+      console.log("[createProvider] 创建 Anthropic (Claude) Provider");
       provider = new AnthropicProvider(config);
       break;
     case "zhipu":
-      console.log("[createProvider] Creating ZhipuProvider");
+      console.log("[createProvider] 创建智谱 AI Provider");
       provider = new ZhipuProvider(config);
       break;
     case "qianwen":
-      console.log("[createProvider] Creating QianwenProvider");
+      console.log("[createProvider] 创建通义千问 Provider");
       provider = new QianwenProvider(config);
       break;
     case "custom":
-      console.log("[createProvider] Creating CustomProvider");
+      console.log("[createProvider] 创建自定义模型 Provider");
       provider = new CustomProvider(config);
       break;
     default:
-      console.error("[createProvider] Unknown provider:", config.provider);
+      console.error("[createProvider] 未知的提供商类型:", config.provider);
       throw new Error(`不支持的 AI 提供商: ${config.provider}`);
   }
-  console.log("[createProvider] Provider created successfully:", provider.provider);
+  console.log("[createProvider] Provider 创建成功:", provider.provider);
   return provider;
 }
 function createTextSplitter(options = {}) {

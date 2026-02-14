@@ -1,4 +1,4 @@
-# k-auto-reader
+# k-reader
 
 An Electron application with React and TypeScript
 

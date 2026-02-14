@@ -13,12 +13,12 @@
 ### ✅ 已生成的文件
 
 1. **macOS 应用包**
-   - 位置: `dist/mac-arm64/k-auto-reader.app`
+   - 位置: `dist/mac-arm64/k-reader.app`
    - 说明: 可直接运行的 macOS 应用
    - 使用方法: 双击即可运行
 
 2. **ZIP 压缩包**
-   - 位置: `dist/k-auto-reader-1.0.0-arm64-mac.zip`
+   - 位置: `dist/k-reader-1.0.0-arm64-mac.zip`
    - 说明: 用于分发的压缩包
    - 使用方法: 解压后双击 `.app` 运行
 
@@ -85,14 +85,14 @@ index-CPPqMelz.js           945.44 kB (epub.js)
 
 ### 方式 1: 直接运行应用包
 ```bash
-open dist/mac-arm64/k-auto-reader.app
+open dist/mac-arm64/k-reader.app
 ```
 
 ### 方式 2: 解压 ZIP 文件
 ```bash
 cd dist
-unzip k-auto-reader-1.0.0-arm64-mac.zip
-open k-auto-reader.app
+unzip k-reader-1.0.0-arm64-mac.zip
+open k-reader.app
 ```
 
 ### 首次运行
@@ -103,7 +103,7 @@ macOS 可能会提示"无法验证开发者"，解决方法：
 
 或者在终端运行：
 ```bash
-xattr -cr dist/mac-arm64/k-auto-reader.app
+xattr -cr dist/mac-arm64/k-reader.app
 ```
 
 ---
@@ -137,7 +137,7 @@ npm run build:mac
 ### 方法 2: 手动创建 DMG（推荐）
 ```bash
 # 使用 macOS 自带工具
-hdiutil create -volname "K-Reader" -srcfolder dist/mac-arm64/k-auto-reader.app -ov -format UDZO dist/k-auto-reader-1.0.0.dmg
+hdiutil create -volname "K-Reader" -srcfolder dist/mac-arm64/k-reader.app -ov -format UDZO dist/k-reader-1.0.0.dmg
 ```
 
 ### 方法 3: 仅构建应用（不生成 DMG）
@@ -171,7 +171,7 @@ mac:
 ### 测试应用
 ```bash
 # 运行应用
-open dist/mac-arm64/k-auto-reader.app
+open dist/mac-arm64/k-reader.app
 
 # 检查应用功能
 - [ ] 导入 EPUB 书籍
